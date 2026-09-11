@@ -41,12 +41,14 @@ validation after immutable recording, and the cowboy opener's character budget.
 Hosted validation caught unsupported IPv6 CIDRs and HTTP apt mirrors incompatible
 with the domain firewall. The final policy uses supported private IPv4 exclusions
 and HTTPS official apt mirrors while preserving credential-free package traffic.
+APT pipelining is disabled for the sandbox firewall, and failed index refreshes
+stop installation instead of silently using stale indexes.
 
 The 90-day history covered every changed file, following renames. Highest code
 churn was the GitHub channel (15 touches, 916 additions/152 deletions), publication
 (13; 1675/333), and review state (9; 214/31). Stable-symbol history for
-`replyAndResolveFinding` had one prior touch (39 additions); remaining symbols
-used file-level fallback. These hotspots informed the delivery recovery and
+`replyAndResolveFinding` had one prior touch (39 additions); `prepareReviewEvidence` had six
+(271 additions/31 deletions). Remaining symbols used file-level fallback. These hotspots informed the delivery recovery and
 trusted-state tests; churn alone was not treated as a defect.
 
 ## Release boundary

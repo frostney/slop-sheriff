@@ -250,7 +250,7 @@ reviews. Missing or malformed keys reject review admission.
 
 Give Convex its AI Gateway key and
 the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
-same token. The app needs repository metadata read, contents read, Actions read,
+same token. The app needs repository metadata read, contents write, Actions read,
 pull requests read/write, issues read/write, and checks read/write. Forward
 `pull_request`, `issue_comment`, `installation`, and
 `installation_repositories` events through Connect to `/eve/v1/github`.

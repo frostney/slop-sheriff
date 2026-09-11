@@ -15,10 +15,11 @@ describe("review environment setup", () => {
       await mkdir(join(root, "sources.list.d"));
       await writeFile(join(root, "sources.list"), "deb http://deb.debian.org/debian stable main\ndeb http://private.example/repo stable main\n");
       await writeFile(join(root, "sources.list.d/ubuntu.sources"), "URIs: http://archive.ubuntu.com/ubuntu/ http://security.ubuntu.com/ubuntu/\n");
-      const command = httpsAptSourcesCommand.replaceAll("/etc/apt", root).replace("sudo sed -i -E", process.platform === "darwin" ? "sed -i '' -E" : "sed -i -E");
+      const command = httpsAptSourcesCommand.replaceAll("/etc/apt", root).replace("sudo sed -i -E", process.platform === "darwin" ? "sed -i '' -E" : "sed -i -E").replaceAll("sudo ", "");
       const child = Bun.spawn(["bash", "-ec", command], { stdout: "pipe", stderr: "pipe" });
       expect(await new Response(child.stderr).text()).toBe("");
       expect(await child.exited).toBe(0);
+      expect(await readFile(join(root, "apt.conf.d/99-review-network"), "utf8")).toContain('Acquire::https::Pipeline-Depth "0";');
       expect(await readFile(join(root, "sources.list"), "utf8")).toBe("deb https://deb.debian.org/debian stable main\ndeb http://private.example/repo stable main\n");
       expect(await readFile(join(root, "sources.list.d/ubuntu.sources"), "utf8")).toBe("URIs: https://archive.ubuntu.com/ubuntu/ https://security.ubuntu.com/ubuntu/\n");
     } finally { await rm(root, { recursive: true, force: true }); }
