@@ -51,10 +51,14 @@ report whose repository, PR, base, head, patch, and plan match trusted context.
 Slop Sheriff selects a locally authored role policy for each Eve turn. The
 existing authored workflow maps trusted active axes one-to-one to Eve root
 copies, preserving their shared sandbox, signed checkpoints and bounded scout
-continuations. Core deduplication, claim/specification, engineering-quality
-and conditional discoverability coverage remains intact. A test-against-spec
-lane records explicit-requirement behavior through real interfaces; a writing
-lane activates for potentially authored prose, UI strings or comments.
+continuations. Content-based triage always retains the broad engineering-quality
+core, including claim alignment and reuse. Specialists activate for concrete
+review needs: changed behavior, public contracts, dependencies/shared abstractions,
+authored prose, tests and consequential risks. Public surfaces retain discoverability.
+Incomplete or unfamiliar patches widen the specialist selection. Decisions and
+reasons are bound to the trusted plan; skipped reasons reach canonical coverage.
+A test-against-spec lane records explicit-requirement behavior through real
+interfaces; a writing lane inspects changed prose, UI strings and comments.
 A conditional test-health lane inspects changed or affected tests as a frozen
 external contract: establish consumer expectations before the implementation,
 then check meaningful public outcomes, failure sensitivity and tolerance of
@@ -100,8 +104,8 @@ The trusted application boundary lists Checks and workflow runs at the exact
 head. It accepts only unexpired artifact archives whose workflow repository,
 head repository, head SHA, run identity, and SHA-256 digest match GitHub
 metadata. Validated archives enter only the credential-free sandbox as
-untrusted data and are never executed. Missing artifacts have one stable
-repository-owned disposition. Stale, mismatched, or unavailable
+untrusted data and are never executed. Missing artifacts remain availability
+metadata; local execution can supply the required behavioral evidence. Stale, mismatched, or unavailable
 application-owned evidence fails closed before lanes run.
 
 Every lane receives the same ledger digest with its bounded evidence packet
@@ -239,7 +243,7 @@ comment. Completion moves the active Check Run to its final verdict.
 The validated report is written into `pendingPublication` before any visible
 review is submitted. That state is bound to the exact trusted review identity
 and coexists with the last successful baseline. A publication failure therefore
-leaves the prior baseline intact and gives `@known-good-review continue` one
+leaves the prior baseline intact and gives `@slop-sheriff continue` one
 application-only operation: reload the staged report and retry GitHub. It does
 not start an Eve coordinator turn, lane, or revalidation worker.
 
@@ -248,12 +252,19 @@ result and a hidden canonical state schema v2 artifact, baseline head,
 whole-patch fingerprint, and per-file fingerprints. Findings use native inline
 review threads at their exact diff locations. Hidden semantic fingerprints,
 derived from the canonical cause, invariant, and remedy, own reconciliation;
-`CR-N` is the readable canonical report identifier. A fixed finding receives one
-reply on its original inline thread, which is then resolved; it is never
-reposted. Replacement threads are submitted and the Check and state artifact
-are made durable before old threads are retired. Retirement failures are
-reported as cleanup telemetry and retried by later publication without
-invalidating the new artifact. Check lookup is scoped to the current head and
+`CR-N` is the readable canonical report identifier. Application-owned baseline
+aliases preserve original thread hashes across trusted delta revalidation; full
+reviews cannot borrow unrelated CR numbers. A verified fixed finding receives
+a brief evidence-and-commit reply before its bot-owned thread resolves. Runtime
+requirements survive deferred revalidation. Hidden or unmatched findings and
+human threads stay open. Replacement threads are submitted before moved-thread
+cleanup. Per-thread failures preserve staged state and prevent completion;
+retries inspect existing replies and resolution state without repeating them.
+Inline findings use the shared Markdown/HTML formatter, at most 100 words with
+an optional short cowboy opener and a final Impact line of at most 300 characters.
+Assembly rejects overlong wording before persistence so the model can revise it.
+The compact main summary collapses out-of-scope coverage, while Check Runs and
+the canonical artifact retain detailed evidence. Check lookup is scoped to the current head and
 fixed aggregate and axis names.
 
 State uses a single comment when it fits, gzip when necessary, then immutable
@@ -276,15 +287,18 @@ lane checkpoints; token-limit failures remain ineligible.
 
 ## Sandbox and telemetry
 
-The Vercel/microsandbox backends allow only GitHub domains and deny private
-network ranges. Docker fallback is offline because it cannot broker per-domain
+The Vercel/microsandbox backends allow GitHub and public dependency/toolchain
+download domains, with private IPv4 ranges denied. Docker fallback is offline because it cannot broker per-domain
 credentials. GitHub checkout authentication stays in the firewall; no token is
 placed in the sandbox.
 
-Sandbox bootstrap aligns `/workspace` ownership with the user that Eve actually
-uses for commands, then verifies the result. The runtime revision key replaces
-durable sandboxes when that contract changes instead of weakening Git's
-ownership checks.
+Eve caches bootstrap tools in its sandbox template. Exact-head preparation
+serializes checkout and dependency setup for the shared sandbox, removes stale
+ignored dependencies, installs declared runtimes and locked packages, and checks
+browser startup when required. Its receipt binds the head, declaration hashes,
+completed steps and observed versions into capability evidence. Setup failures
+stop dispatch; missing installable tools are not successful coverage gaps. The
+runtime revision key replaces stale templates when the bootstrap changes.
 
 Each turn stops sandbox compute. The durable filesystem is resumed for the
 next delta. A close/merge operation removes `/workspace` contents and stops the

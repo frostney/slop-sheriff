@@ -52,7 +52,7 @@ test("rejects oversized inline findings before attempting publication", async ()
   let requests = 0;
   const octokit = new Octokit({ request: { fetch: async () => { requests += 1; return json([]); } } });
   const oversized = report();
-  oversized.findings = oversized.findings.map((finding) => ({ ...finding, impact: "x".repeat(65_001) }));
+  oversized.findings = oversized.findings.map((finding) => ({ ...finding, evidence: ["x".repeat(65_001)] }));
   await expect(publishReview({ octokit, context: context(), report: oversized }))
     .rejects.toThrow("An inline finding exceeds");
   expect(requests).toBe(0);
@@ -240,11 +240,7 @@ describe("GitHub publication lifecycle", () => {
       await expect(publishReview({ context: context(), octokit, report: report(), reconcileFindings: false }))
         .rejects.toThrow("no longer matches the reviewable pull request");
       expect(headReads).toBe(changedOnRead);
-      if (changedOnRead === 2) expect(writes).toEqual([]);
-      else {
-        expect(writes.length).toBeGreaterThan(0);
-        expect(writes.every((request) => request.endsWith("/check-runs"))).toBe(true);
-      }
+      expect(writes).toEqual([]);
     }
   });
 
@@ -828,6 +824,7 @@ describe("GitHub publication lifecycle", () => {
             path: url.pathname,
           });
 
+          if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) return json([]);
           if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
             return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
           }
@@ -890,7 +887,7 @@ describe("GitHub publication lifecycle", () => {
     ).toBeFalse();
   });
 
-  test("retires an old thread only after the replacement and state artifact are durable", async () => {
+  test("leaves untracked legacy threads open when a new full review reuses the CR number", async () => {
     const requests: CapturedRequest[] = [];
     const octokit = new Octokit({
       auth: "test-token",
@@ -1015,13 +1012,8 @@ describe("GitHub publication lifecycle", () => {
       request.path.endsWith("/pulls/7/comments/201/replies"),
     );
     expect(stateArtifact).toBeGreaterThan(-1);
-    expect(retirementReply).toBeGreaterThan(stateArtifact);
-    expect(requests[retirementReply]?.body).toMatchObject({
-      body: expect.stringContaining("no longer published"),
-    });
-    expect(requests[retirementReply]?.body).not.toMatchObject({
-      body: expect.stringContaining("moved to a new inline location"),
-    });
+    expect(retirementReply).toBe(-1);
+    expect(requests.some((request) => graphqlOperation(request.body).includes("KnownGoodReviewResolveThread"))).toBeFalse();
   });
 
   test("replies to and resolves a fixed finding without reposting it", async () => {
@@ -1131,7 +1123,7 @@ describe("GitHub publication lifecycle", () => {
       requests.find((request) =>
         request.path.endsWith("/pulls/7/comments/201/replies"),
       )?.body,
-    ).toMatchObject({ body: expect.stringContaining("✅ Fixed in the current review.") });
+    ).toMatchObject({ body: expect.stringContaining("✅ Verified fixed in [head](https://github.com/acme/widget/commit/head).") });
     expect(
       requests.some(
         (request) =>

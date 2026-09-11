@@ -36,6 +36,7 @@ import {
   writeReviewEvidenceManifest,
 } from "./evidence-bundle";
 import type { PreparedGitHubEvidence } from "./github-evidence";
+import { prepareReviewEnvironment } from "./environment-setup";
 import {
   commonHistorySchema,
   commonMemoryQuery,
@@ -179,6 +180,7 @@ async function preparedLedger(
     }
   }
   const capabilities = await readCapabilityPreflight(sandbox, identity);
+  if (!capabilities.setup) return null; // Rebuild ledgers prepared before environment provisioning.
   validateReviewEvidenceLedgerComponents(ledger, {
     capabilities,
     manifest,
@@ -187,14 +189,33 @@ async function preparedLedger(
   return ledger;
 }
 
-export async function prepareReviewEvidence(
+// Tools can be retried or invoked concurrently before the immutable ledger
+// exists. Serialize the whole checkout/setup transaction on the shared sandbox.
+const pendingPreparations = new Map<string | RuntimeSandboxSession, Promise<ReviewEvidenceLedger>>();
+
+export function prepareReviewEvidence(
+  ...args: Parameters<typeof prepareReviewEvidenceOnce>
+): Promise<ReviewEvidenceLedger> {
+  const sandbox = args[0];
+  const key = sandbox.id || sandbox;
+  const prior = pendingPreparations.get(key);
+  const pending = (prior ? prior.catch(() => undefined) : Promise.resolve())
+    .then(() => prepareReviewEvidenceOnce(...args));
+  pendingPreparations.set(key, pending);
+  void pending.finally(() => {
+    if (pendingPreparations.get(key) === pending) pendingPreparations.delete(key);
+  }).catch(() => undefined);
+  return pending;
+}
+
+async function prepareReviewEvidenceOnce(
   sandbox: RuntimeSandboxSession,
   trusted: TrustedGitHubContext,
   inputFiles: unknown,
   input: {
     readonly collectGitHubEvidence: () => Promise<PreparedGitHubEvidence>;
     readonly collectMemory: (query: string) => Promise<MemoryAvailability>;
-    readonly config: Pick<ReviewConfig, "embedding">;
+    readonly config: Pick<ReviewConfig, "embedding"> & Partial<Pick<ReviewConfig, "publicRoots">>;
     readonly planKind: "full" | "delta";
     readonly workspaceDependencies?: ReviewWorkspaceDependencies;
   },
@@ -329,7 +350,11 @@ export async function prepareReviewEvidence(
     entries,
   });
   await writeReviewEvidenceManifest(sandbox, manifest);
-  const capabilities = await runCapabilityPreflight(sandbox, identity);
+  const setup = await prepareReviewEnvironment(sandbox, identity, {
+    paths: files.map((file) => file.path),
+    publicRoots: input.config.publicRoots ?? [],
+  });
+  const capabilities = await runCapabilityPreflight(sandbox, identity, setup);
   if (capabilities.created) {
     console.info(
       JSON.stringify({

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { reviewEvidenceDirectory, type ReviewEvidenceIdentity } from "./evidence-bundle";
+import { environmentSetupSchema, type EnvironmentSetup } from "./environment-setup";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -20,6 +21,7 @@ export const capabilityCommandNames = [
   "go",
   "gradle",
   "java",
+  "lwpt",
   "make",
   "mvn",
   "node",
@@ -47,17 +49,21 @@ export const capabilityRepositoryMarkers = [
   "build.gradle",
   "build.gradle.kts",
   "bun.lock",
+  "bun.lockb",
   "composer.json",
   "deno.json",
   "deno.jsonc",
   "go.mod",
   "gradlew",
+  "lwpt.toml",
+  "lwpt.lock",
   "mvnw",
   "package-lock.json",
   "package.json",
   "pnpm-lock.yaml",
   "pyproject.toml",
   "requirements.txt",
+  "uv.lock",
   "yarn.lock",
 ] as const;
 
@@ -67,7 +73,8 @@ const capabilityPayloadSchema = z
     baseSha: revisionSchema,
     headSha: revisionSchema,
     patchFingerprint: fingerprintSchema,
-    network: z.literal("github-only"),
+    network: z.enum(["github-only", "public-dependencies"]),
+    setup: environmentSetupSchema.optional(),
     commands: z.array(
       z.strictObject({ name: commandNameSchema, available: z.boolean() }),
     ),
@@ -160,11 +167,16 @@ export async function readCapabilityPreflight(
 export async function runCapabilityPreflight(
   sandbox: CapabilityPreflightSandbox,
   identity: ReviewEvidenceIdentity,
+  setup?: EnvironmentSetup,
 ): Promise<{ readonly created: boolean; readonly preflight: CapabilityPreflight }> {
   try {
+    const preflight = await readCapabilityPreflight(sandbox, identity);
+    if (setup && JSON.stringify(preflight.setup) !== JSON.stringify(setup)) {
+      throw new Error("Capability preflight predates the prepared environment");
+    }
     return {
       created: false,
-      preflight: await readCapabilityPreflight(sandbox, identity),
+      preflight,
     };
   } catch (error) {
     if (!(error instanceof Error) || error.message !== "Capability preflight is unavailable") {
@@ -215,7 +227,8 @@ export async function runCapabilityPreflight(
     baseSha: identity.baseSha,
     headSha: identity.headSha,
     patchFingerprint: identity.patchFingerprint,
-    network: "github-only",
+    network: "public-dependencies",
+    ...(setup ? { setup } : {}),
     commands: capabilityCommandNames.map((name) => ({
       name,
       available: availability.get(name) ?? false,

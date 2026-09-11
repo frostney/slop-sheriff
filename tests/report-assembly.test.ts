@@ -1,3 +1,4 @@
+import { selectReviewAxes } from "../src/review/axis-selection";
 import { describe, expect, test } from "bun:test";
 import { decodeReviewState, encodeReviewState } from "../src/github/review-state";
 import { pendingPublicationRetry } from "../src/github/publication";
@@ -120,6 +121,28 @@ function draft() {
 }
 
 describe("application-owned review report assembly", () => {
+  test("canonical coverage retains trusted specialist selection reasons and rejects contradictory decisions", () => {
+    const decisions = selectReviewAxes([{ path: "bun.lock", blobSha: "a", status: "modified", patch: null }], []);
+    const identity = { ...assemblyState().identity, planKind: "full" as const, baselineHead: null,
+      activeAxes: decisions.filter((item) => item.selected).map((item) => item.axis), selectedFindingIds: [], axisDecisions: decisions };
+    const state = beginReportAssembly(identity);
+    const report = assembleCanonicalReviewReport({ state, priorReport: null, draft: draft(), generatedAt: baselineReport().generatedAt }).report;
+    expect(report?.coverage.skippedAxes).toEqual(decisions.filter((item) => !item.selected).map((item) => ({ name: item.axis, reason: item.reason })));
+    expect(() => beginReportAssembly({ ...identity, axisDecisions: decisions.map((item) => ({ ...item, selected: true })) })).toThrow();
+  });
+
+  test("runtime-backed findings cannot become fixed on source-only revalidation", () => {
+    const prior = baselineReport();
+    const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4")
+      .map((item) => ({ ...item, status: "fixed", staticOnly: true })));
+    expect(() => assembleCanonicalReviewReport({ state, priorReport: prior, draft: draft(), generatedAt: prior.generatedAt }))
+      .toThrow("requires runtime evidence matching the original finding");
+    const deferred = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4")
+      .map((item) => ({ ...item, status: "deferred", staticOnly: true })));
+    expect(assembleCanonicalReviewReport({ state: deferred, priorReport: prior, draft: draft(), generatedAt: prior.generatedAt }).report?.findings[1]?.status)
+      .toBe("deferred");
+  });
+
   test("pins delta assembly to its baseline while allowing the base branch to advance", () => {
     const prior = baselineReport();
     const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4"));

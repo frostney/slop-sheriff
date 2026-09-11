@@ -81,8 +81,11 @@ bun x vercel connect attach YOUR-CONNECTOR-UID \
   --triggers --trigger-path /eve/v1/github
 ```
 
-Verify the App has repository metadata, contents, and Actions **read** access,
-and pull requests, issues, and Checks **read/write** access. GitHub sends
+Verify the App has repository metadata and Actions **read** access,
+and contents, pull requests, issues, and Checks **read/write** access.
+GitHub requires Contents write to resolve verified fixed review threads; the
+application exposes no push or merge tools. For existing installations, accept
+the permission update in GitHub installation settings. GitHub sends
 `installation` and `installation_repositories` events to Apps automatically;
 they cannot be selected as manual subscriptions. Verify Connect forwards those
 lifecycle events as well as PRs and comments to the production project. Keep

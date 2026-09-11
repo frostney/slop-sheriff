@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SandboxNetworkPolicy } from "eve/sandbox";
 import {
-  githubOnlyNetworkPolicy,
+  reviewNetworkPolicy,
   prepareReviewWorkspace,
 } from "../src/github/review-workspace";
 import type { TrustedGitHubContext } from "../src/github/trusted-context";
@@ -83,7 +83,7 @@ describe("review workspace preparation", () => {
 
     expect(observed.removed).toEqual([".git"]);
     expect(observed.policies).toHaveLength(2);
-    expect(observed.policies.at(-1)).toEqual(githubOnlyNetworkPolicy);
+    expect(observed.policies.at(-1)).toEqual(reviewNetworkPolicy);
     expect(observed.commands.join("\n")).not.toContain(
       "secret-installation-token",
     );
@@ -99,7 +99,7 @@ describe("review workspace preparation", () => {
       expect.stringContaining("refs/known-good-review/head^{commit}"),
       expect.stringContaining("refs/known-good-review/merge-base^{commit}"),
       expect.stringContaining("checkout --detach --force"),
-      expect.stringContaining("clean -ffd"),
+      expect.stringContaining("clean -ffdx"),
     ]);
   });
 
@@ -112,6 +112,6 @@ describe("review workspace preparation", () => {
       }),
     ).rejects.toThrow("Trusted pull request fetch failed");
     expect(observed.policies).toHaveLength(2);
-    expect(observed.policies.at(-1)).toEqual(githubOnlyNetworkPolicy);
+    expect(observed.policies.at(-1)).toEqual(reviewNetworkPolicy);
   });
 });

@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
+import { findingBodyHtml } from "../src/github/review-presentation";
+import { exampleFinding, exampleFindingSource } from "../src/landing/example-finding";
 import { landingPage } from "../src/landing/page";
 import { landingPaths, landingResponse } from "../src/landing/routes";
 
@@ -23,8 +25,15 @@ describe("public landing routes", () => {
     expect(html).toContain(`<meta property="og:image" content="${canonicalOrigin}/assets/slop-sheriff-social.jpg">`);
     expect(html).toContain('id="install"');
     expect(html).toContain("/docs/install.md");
-    expect(html).toContain("Synthetic example");
-    expect(html).toContain("<details>");
+    expect(html).toContain(exampleFindingSource);
+    expect(html).toContain(findingBodyHtml(exampleFinding));
+    expect(html).toContain("subsequently fixed");
+    expect(html).not.toContain("Synthetic example");
+    expect(html).not.toContain("invoice");
+    expect(html).not.toContain("<details>");
+    const visibleText = html.split("<body>")[1]!.replace(/<[^>]+>/g, " ").replace(/&[^;]+;/g, " ");
+    expect(visibleText.trim().split(/\s+/u).length).toBeGreaterThanOrEqual(310);
+    expect(visibleText.trim().split(/\s+/u).length).toBeLessThanOrEqual(350);
     expect(html).not.toContain("<script");
     expect(html).not.toContain("untrusted-preview.example");
     expect(html).not.toContain("injected.example");

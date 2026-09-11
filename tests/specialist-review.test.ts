@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { asSchema } from "ai";
 import { reviewInstructions } from "../src/review/policy";
 import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
-import { activeReviewAxes } from "../src/review/axes";
 import { readNextReviewEvidencePacket, reviewEvidenceManifestSchema, reviewEvidencePatchFile, reviewEvidencePacketCharacters, writeIncludedReviewEvidence, type ReviewEvidenceManifest } from "../src/review/evidence-bundle";
 import { validateLaneCheckpointCoverage, writeLaneCheckpoint, type LaneCompletedReport } from "../src/review/lane-checkpoint";
 import { retainSpecialistEvidence } from "../src/review/specialist-report";
@@ -69,14 +68,6 @@ describe("specialist evidence obligations", () => {
       if (packet.nextCursor === null) break;
     }
     expect(delivered).toBe(patch);
-  });
-
-  test("activation retains core review and excludes writing only for known non-prose inputs", () => {
-    expect(activeReviewAxes(["src/main.ts"], [])).toEqual(["deduplication", "claim-and-specification", "engineering-quality", "test-against-spec", "writing-quality", "test-health"]);
-    expect(activeReviewAxes(["bun.lock", "assets/logo.png"], [])).toEqual(["deduplication", "claim-and-specification", "engineering-quality", "test-against-spec", "test-health"]);
-    expect(activeReviewAxes(["README.md"], [])).not.toContain("test-health");
-    expect(activeReviewAxes(["website/index.html"], [])).toContain("discoverability");
-    expect(activeReviewAxes(["unfamiliar-format"], [])).toContain("writing-quality");
   });
 
   test("scoped packets retain every manifest index and core patches while omitting spec implementation payloads", async () => {

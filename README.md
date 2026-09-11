@@ -115,20 +115,26 @@ agents:
 
 Set `personality: false` for plain review language. The default cowboy voice
 changes presentation only; it never changes evidence, severity, coverage, or
-blocking policy. Each finding has an impact summary of at most 300 characters
-and expandable full analysis. Existing reports retain their full impact and
-finding identity. See the [voice and visual guide](docs/brand.md).
+blocking policy. Each inline finding uses at most 100 words: a short cowboy
+opener, title/severity, concrete evidence and a final Impact line of at most
+300 characters. Full analysis stays in the canonical report. See the [voice and visual guide](docs/brand.md).
 The [validation record](docs/validation/slop-sheriff.md) includes comment
 previews, policy measurements and the remaining real-model comparison work.
 
-The core reuse/design, claim/specification, and engineering-quality lanes
-remain active. The spec-testing lane checks explicit requirements through real
-interfaces. A conditional test-health lane checks affected tests as frozen
+One broad core covers correctness, claims, reuse and test value. Triage selects
+specialists from changed content, with reasons retained in coverage: behavior
+changes get real-interface specification checks; public contracts, dependencies
+and consequential risks receive focused additional review. Unknown or incomplete
+patches widen coverage conservatively. A conditional test-health lane checks affected tests as frozen
 consumer contracts: public outcomes, failure sensitivity and tolerance of
 internal refactors. Discoverability is conditional on public web content; writing
-quality activates for files that may contain authored prose, strings or
-comments. Specialist reports classify their scope and preserve failed and
-unverified results. An unavailable runtime never becomes a behavioral pass.
+quality activates for changed authored prose, strings or substantive comments. Specialist reports classify their scope and preserve failed and
+unverified results. Supported defects from every lane are posted inline;
+out-of-scope commentary is collapsed in the main summary. Before dispatch,
+shared setup installs declared toolchains, locked dependencies and needed browser
+components. Setup failure prevents review completion. Real external requirements
+remain explicit limitations. Fixed bot threads receive a brief acknowledgement
+and commit link, then resolve only with evidence matching the original finding.
 
 The former `agents.commenter` key remains accepted for configuration
 compatibility but is ignored; publication formatting is deterministic.

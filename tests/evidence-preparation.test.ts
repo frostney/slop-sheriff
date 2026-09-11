@@ -83,7 +83,7 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
       repositoryId: "R_widget", repositoryDatabaseId: 1, repositoryCreatedAt: 0,
       pullRequest: 61, baseSha, headSha, patchFingerprint: "a".repeat(64),
     };
-    const ledger = await prepareReviewEvidence(
+    const preparing = prepareReviewEvidence(
       runtime as unknown as RuntimeSandboxSession, trusted,
       paths.map((path) => ({ path, status: "modified" })), {
         planKind: "full", config: parseReviewConfig(null),
@@ -98,6 +98,19 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
         }),
       },
     );
+    const concurrent = prepareReviewEvidence(runtime as unknown as RuntimeSandboxSession, trusted,
+      paths.map((path) => ({ path, status: "modified" })), {
+        planKind: "full", config: parseReviewConfig(null),
+        collectMemory: async () => { throw new Error("Concurrent preparation recollected memory"); },
+        collectGitHubEvidence: async () => { throw new Error("Concurrent preparation recollected GitHub evidence"); },
+        workspaceDependencies: {
+          getMergeBase: async () => { throw new Error("Concurrent preparation fetched checkout"); },
+          getInstallationToken: async () => { throw new Error("Concurrent preparation requested token"); },
+        },
+      });
+    const [ledger, concurrentLedger] = await Promise.all([preparing, concurrent]);
+    expect(concurrentLedger).toEqual(ledger);
+    expect(ledger.components.capabilityDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(tokenRequests).toBe(1);
     const manifest = await readReviewEvidenceManifest(runtime, trusted);
     expect(manifest.entries.find((entry) => entry.path === "src/generated.ts"))

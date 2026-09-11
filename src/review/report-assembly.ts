@@ -21,6 +21,11 @@ export const schemaDiagnosticSchema = z.object({
 
 export type SchemaDiagnostic = z.infer<typeof schemaDiagnosticSchema>;
 
+export const reviewAxisDecisionsSchema = z.array(z.object({
+  axis: z.enum(reviewAxes), selected: z.boolean(), reason: z.string().min(1),
+  paths: z.array(repositoryPathSchema).max(2_000),
+})).length(reviewAxes.length);
+
 export const reportAssemblyIdentitySchema = z.object({
   executionRevision: z.literal("review-report-v2"),
   repositoryId: z.string().min(1),
@@ -32,10 +37,15 @@ export const reportAssemblyIdentitySchema = z.object({
   baselineHead: revisionSchema.nullable(),
   reviewPaths: z.array(repositoryPathSchema).max(2_000),
   activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
+  axisDecisions: reviewAxisDecisionsSchema.optional(),
   selectedFindingIds: z
     .array(z.string().regex(/^CR-[1-9]\d*$/))
     .max(100),
 }).superRefine((identity, context) => {
+  if (identity.axisDecisions && (new Set(identity.axisDecisions.map((item) => item.axis)).size !== reviewAxes.length ||
+    identity.axisDecisions.some((item) => item.selected !== identity.activeAxes.includes(item.axis)))) {
+    context.addIssue({ code: "custom", path: ["axisDecisions"], message: "Triage decisions must cover each axis and agree with dispatch" });
+  }
   if ((identity.planKind === "delta") !== (identity.baselineHead !== null)) {
     context.addIssue({ code: "custom", path: ["baselineHead"], message: "Only delta reviews require an exact baseline head" });
   }
@@ -154,6 +164,18 @@ export function validateReportAssemblyIdentity(
     throw new Error("Review report state does not match the trusted review");
   }
   return parsed;
+}
+
+export function validateRevalidationEvidence(
+  findings: readonly ReviewFinding[], priorReport: ReviewReport | null, priorRuntimeFindingIds: readonly string[] = [],
+): void {
+  const required = new Set([...priorRuntimeFindingIds, ...(priorReport?.findings.filter((finding) => !finding.staticOnly).map((finding) => finding.id) ?? [])]);
+  for (const finding of findings) {
+    if (required.has(finding.id) && finding.status === "fixed" && finding.staticOnly) {
+      throw new ReviewReportValidationError([{ code: "custom", path: ["revalidatedFindings", finding.id] }],
+        `Finding ${finding.id} requires runtime evidence matching the original finding. Rerun its real-interface probe or record deferred with what remains unverified.`);
+    }
+  }
 }
 
 export function recordRevalidationResults(
@@ -286,11 +308,12 @@ const skippedAxisReasons = {
 
 function skippedReviewAxes(
   activeAxes: readonly (typeof reviewAxes)[number][],
+  decisions: ReportAssemblyIdentity["axisDecisions"],
 ): readonly { readonly name: string; readonly reason: string }[] {
   const active = new Set(activeAxes);
   return reviewAxes
     .filter((axis) => !active.has(axis))
-    .map((name) => ({ name, reason: skippedAxisReasons[name] }));
+    .map((name) => ({ name, reason: decisions?.find((decision) => decision.axis === name)?.reason ?? skippedAxisReasons[name] }));
 }
 
 function reportVerdict(
@@ -311,6 +334,7 @@ function reportVerdict(
 function priorFindings(
   state: ReportAssemblyState,
   priorReport: ReviewReport | null,
+  priorRuntimeFindingIds: readonly string[],
 ): ReviewFinding[] {
   if (state.identity.planKind === "full") return [];
   if (!priorReport) {
@@ -346,6 +370,7 @@ function priorFindings(
   const revalidated = new Map(
     state.revalidatedFindings.map((finding) => [finding.id, finding] as const),
   );
+  validateRevalidationEvidence(state.revalidatedFindings, priorReport, priorRuntimeFindingIds);
   return priorReport.findings.map(
     (finding) => revalidated.get(finding.id) ?? finding,
   );
@@ -355,6 +380,7 @@ export function assembleCanonicalReviewReport(input: {
   readonly draft: unknown;
   readonly generatedAt: string;
   readonly priorReport: ReviewReport | null;
+  readonly priorRuntimeFindingIds?: readonly string[];
   readonly state: ReportAssemblyState;
 }): ReportAssemblyState {
   const state = reportAssemblyStateSchema.parse(input.state);
@@ -370,7 +396,7 @@ export function assembleCanonicalReviewReport(input: {
     }
   }
 
-  const prior = priorFindings(state, input.priorReport);
+  const prior = priorFindings(state, input.priorReport, input.priorRuntimeFindingIds ?? []);
   const knownIdentities = new Set(prior.filter((finding) => finding.status !== "fixed").map(findingIdentity));
   const fresh = coalesceFreshFindings(
     draft.data.freshFindings,
@@ -409,7 +435,7 @@ export function assembleCanonicalReviewReport(input: {
     },
     coverage: {
       activeAxes: state.identity.activeAxes,
-      skippedAxes: skippedReviewAxes(state.identity.activeAxes),
+      skippedAxes: skippedReviewAxes(state.identity.activeAxes, state.identity.axisDecisions),
       ...draft.data.coverage,
     },
     churn: draft.data.churn,

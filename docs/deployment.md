@@ -84,7 +84,7 @@ Freeze the head and deployments while the review runs. Confirm the repository
 is included in the existing App installation and trusted-base policy remains
 advisory. Observe completion, exact-head publication, all required lane coverage,
 canonical finding identities, duplicate and false-positive control, impact
-summaries, and expandable detail. Failure or missing coverage is not completion.
+summaries, concise inline comments, and verified thread resolution. Failure or missing coverage is not completion.
 Return PR42 to draft after the terminal result before pushing any follow-up fix.
 Assess the result before enabling ongoing automatic self-review.
 

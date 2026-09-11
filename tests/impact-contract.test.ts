@@ -149,20 +149,16 @@ describe("bounded impact contract", () => {
     expect(result.text).toBe("accepted");
   });
 
-  test("renders bounded Unicode-safe summaries and escaped complete analysis collapsed by default", () => {
-    const full = `</details><script>alert('x')</script>\n\n${"e\u0301🤠".repeat(200)}\n\nThe \`src/review.ts\` retry **duplicates** comments.\n\n\`\`\`html\n</details>\n\`\`\``;
+  test("ends with the escaped bounded impact and omits the stored full analysis", () => {
+    const full = `</details><script>alert('x')</script>\n\n${"e\u0301🤠".repeat(200)}\n\nThe retry duplicates comments.`;
     const finding = reviewFindingSchema.parse({ ...draftFinding, impact: full, id: "CR-1", status: "open" });
     const body = findingBody({ ...finding, impactSummary: "<img src=x> & **consequence**" });
-    expect(body).toContain("Impact: &lt;img src=x&gt; &amp; \\*\\*consequence\\*\\*");
-    expect(body).toContain("<details>\n<summary>The full rundown</summary>");
-    expect(body).toContain("&lt;/details&gt;&lt;script&gt;`alert`\\('x'\\)&lt;/script&gt;\n");
-    expect(body).not.toContain("<pre>");
-    expect(body).toContain("The `src/review.ts` retry \\*\\*duplicates\\*\\* comments\\.");
-    expect(body).toContain("\\`\\`\\`html\n&lt;/details&gt;\n\\`\\`\\`");
-    expect(body).not.toContain("<details open");
-    expect(body.match(/<\/details>/g)).toHaveLength(1);
-    expect(body).toContain("e\u0301🤠".repeat(200));
-    expect(findingBody(finding, "line", false)).toContain("<summary>Full impact analysis</summary>");
+    expect(body).toEndWith("Impact: &lt;img src=x&gt; &amp; \\*\\*consequence\\*\\*");
+    expect(body).not.toContain("<details>");
+    expect(body).not.toContain("Smallest remedy");
+    expect(body).not.toContain("<script>");
+    expect(body).not.toContain("e\u0301🤠".repeat(200));
+    expect(findingBody(finding, "line", false)).not.toContain("rundown");
     for (const impact of ["🤠".repeat(200), "e\u0301".repeat(200), "x".repeat(298) + "👩‍👩‍👧‍👦more", "x".repeat(300)]) {
       const legacy = { ...finding, impact, impactSummary: undefined };
       const summary = findingImpactSummary(legacy);

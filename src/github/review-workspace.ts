@@ -4,6 +4,7 @@ import { z } from "zod";
 import { githubAdapter, githubConnector } from "./chat-adapter";
 import type { TrustedGitHubContext } from "./trusted-context";
 
+// Vercel rejects IPv6 CIDRs; keep this policy within its supported IPv4 surface.
 const privateSubnets = [
   "10.0.0.0/8",
   "100.64.0.0/10",
@@ -15,6 +16,22 @@ const privateSubnets = [
 
 export const githubOnlyNetworkPolicy: SandboxNetworkPolicy = {
   allow: ["github.com", "*.github.com", "*.githubusercontent.com"],
+  subnets: { deny: [...privateSubnets] },
+};
+
+// Public dependency/tool downloads have no credential transforms. The temporary
+// repository fetch policy remains scoped to the trusted GitHub repository.
+export const reviewNetworkPolicy: SandboxNetworkPolicy = {
+  allow: [
+    "github.com", "*.github.com", "*.githubusercontent.com",
+    "registry.npmjs.org", "registry.yarnpkg.com", "nodejs.org", "bun.sh",
+    "deb.debian.org", "security.debian.org", "archive.ubuntu.com", "*.archive.ubuntu.com", "security.ubuntu.com", "ports.ubuntu.com",
+    "cdn.amazonlinux.com", "*.amazonlinux.com", "*.amazonaws.com", "downloads.freepascal.org",
+    "astral.sh", "releases.astral.sh", "pypi.org", "files.pythonhosted.org",
+    "sh.rustup.rs", "static.rust-lang.org", "index.crates.io", "static.crates.io", "crates.io",
+    "proxy.golang.org", "sum.golang.org", "go.dev", "dl.google.com", "storage.googleapis.com",
+    "cdn.playwright.dev", "playwright.download.prss.microsoft.com", "cdn.puppeteer.dev",
+  ],
   subnets: { deny: [...privateSubnets] },
 };
 
@@ -165,7 +182,7 @@ export async function prepareReviewWorkspace(
     );
   } finally {
     if (credentialsBrokered) {
-      await sandbox.setNetworkPolicy(githubOnlyNetworkPolicy);
+      await sandbox.setNetworkPolicy(reviewNetworkPolicy);
     }
   }
 
@@ -192,7 +209,7 @@ export async function prepareReviewWorkspace(
   await runGit(
     sandbox,
     "Review workspace cleanup",
-    "-C /workspace clean -ffd",
+    "-C /workspace clean -ffdx",
   );
   return mergeBaseSha;
 }

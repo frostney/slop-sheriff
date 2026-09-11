@@ -1,3 +1,7 @@
+import { githubAdapter } from "../../src/github/chat-adapter";
+import { readLatestReviewState } from "../../src/github/publication";
+import { trustedGitHubContext } from "../../src/github/trusted-context";
+import { validateFindingPresentation } from "../../src/github/review-presentation";
 import { defineTool, toolOutput } from "eve/tools";
 import {
   currentReviewReportState,
@@ -11,6 +15,8 @@ import { advanceReviewRecovery } from "../../src/review/recovery";
 import {
   recordRevalidationResults,
   reportAssemblyFailure,
+  validateRevalidationEvidence,
+  ReviewReportValidationError,
 } from "../../src/review/report-assembly";
 
 import { recordReviewRevalidationInputSchema } from "../../src/review/tool-inputs";
@@ -21,7 +27,7 @@ export default defineTool({
   description:
     "Persist the complete typed outcomes for every application-selected prior finding. The application validates exact finding IDs and advances revalidation recovery. Values are retained in durable session state for report assembly and recovery.",
   inputSchema: recordReviewRevalidationInputSchema,
-  execute({ findings }, ctx) {
+  async execute({ findings }, ctx) {
     if (ctx.session.parent) {
       throw new Error("Only the review coordinator can record revalidation");
     }
@@ -37,6 +43,19 @@ export default defineTool({
     }
     const current = currentReviewReportState(ctx.session.auth.current);
     try {
+      const trusted = trustedGitHubContext(ctx.session.auth.current);
+      const baseline = (await readLatestReviewState(githubAdapter(trusted.installationId).octokit, trusted))?.baseline;
+      if (!baseline || baseline.head !== current.identity.baselineHead) {
+        throw new Error("Revalidation baseline no longer matches the trusted review");
+      }
+      validateRevalidationEvidence(findings, baseline.report ?? null,
+        Object.entries(baseline.findingRuntimeRequirements ?? {}).filter(([, required]) => required).map(([id]) => id));
+      for (const finding of findings.filter((finding) => finding.status !== "fixed")) {
+        try { validateFindingPresentation(finding); } catch (error) {
+          throw new ReviewReportValidationError([{ code: "custom", path: ["findings", finding.id] }],
+            error instanceof Error ? error.message : "Finding exceeds presentation limits");
+        }
+      }
       const next = recordRevalidationResults(current, findings);
       reviewReportState.update(() => next);
       const advanced = advanceReviewRecovery(recovery, {

@@ -37,6 +37,8 @@ export const reviewStateSchema = z.object({
       findingsArtifactUrl: z.url(),
       files: z.record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/)),
       report: reviewReportSchema,
+      findingThreadIdentities: z.record(z.string().regex(/^CR-[1-9]\d*$/), z.string().regex(/^[a-f0-9]{64}$/)).optional(),
+      findingRuntimeRequirements: z.record(z.string().regex(/^CR-[1-9]\d*$/), z.boolean()).optional(),
     })
     .nullable(),
   pendingPublication: z

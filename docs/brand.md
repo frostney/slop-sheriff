@@ -7,7 +7,9 @@ The joke belongs to the bot. A contributor is never the punchline.
 ## Voice
 
 Use plain technical explanations. Keep cowboy language to short status lines
-and presentation labels. Do not add accents, repeated greetings, threats,
+and each finding’s short opener. Dry, cheeky humor may target needless
+complexity: “That’s a crowded saddle, partner.” A dependency-overuse finding
+still needs an equivalent simpler option and a concrete consequence. Do not add accents, repeated greetings, threats,
 insults, or jokes about a contributor's competence. Severity and verdict names
 keep their literal meaning. A clean review means no findings were reported,
 not a guarantee that the code has no defects.
@@ -16,12 +18,14 @@ not a guarantee that the code has no defects.
 | --- | --- | --- |
 | Running | The sheriff is on patrol. Review in progress. | The review is currently running. |
 | Complete | Patrol complete. | No extra status line. |
-| Expanded impact label | The full rundown | Full impact analysis |
+| Finding opener | Hold up there, partner. | No opener. |
 | Failure | The review did not complete. See the Check Run for details. | Same precise failure message. |
 
-Finding titles, evidence, impact summaries and fixes remain technical in both
-modes. The visible impact summary is limited to 300 characters. Readers can
-expand the full analysis without losing detail or changing finding identity.
+Each inline finding uses at most 100 words, including a varied three-to-six-word
+cowboy opener, severity, title, and concrete evidence. The final Impact line is
+limited to 300 characters. No expanded rundown or trailing remedy is published.
+Both modes retain the same technical evidence and finding identity. Overlong
+findings must be rewritten before publication; evidence is never silently cut.
 
 Writing-quality findings identify an observable problem and offer a specific
 remedy. Flag stiff phrasing, redundancy, vague promises, unsupported precision,
@@ -72,18 +76,3 @@ reviews and stored baselines remain readable. A repository rename does not
 rename the GitHub App registration or the Vercel project. Keep those existing
 resources and credentials when rolling out this change. If the App login is
 renamed separately, pin its immutable `GITHUB_BOT_USER_ID` before that change.
-
-## Name check
-
-On 10 September 2026, exact-name GitHub repository and issue searches, general
-web searches, Reddit search, indexed X searches, and indexed Product Hunt and
-Hacker News searches found no code or PR review product named Slop Sheriff,
-slop-sheriff, or SlopSheriff. Direct X search returned HTTP 403, so its coverage
-is limited to indexed results. `frostney/slop-sheriff` was available when checked.
-
-Related uses were found: Steve Yegge describes a
-[PR Sheriff workflow in Gas Town](https://steve-yegge.medium.com/vibe-maintainer-a2273a841040),
-and Archestra describes an
-[AI sheriff for repository moderation](https://archestra.ai/blog/only-responsible-ai).
-Neither uses the exact proposed name. The username `slopsheriff` appears on
-[AI Slop Hub](https://aislophub.ai/); the owner accepted a username-only collision.

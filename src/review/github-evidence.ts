@@ -291,7 +291,7 @@ export function prepareExactHeadGitHubEvidence(
     summary:
       "No reusable generated-output artifact is available for this exact head.",
     remedy:
-      "Upload review-safe generated output from the exact-head workflow when a review depends on it.",
+      "Generate equivalent output in the prepared local environment when needed; use an exact-head workflow artifact when it requires CI-only infrastructure.",
   });
   const missingCheckGap = evidenceGapSchema.parse({
     id: "exact-head-checks-missing",
@@ -304,7 +304,6 @@ export function prepareExactHeadGitHubEvidence(
   });
   const gaps = [
     ...(checks.length > 0 ? [] : [missingCheckGap]),
-    ...(artifacts.entries.length > 0 ? [] : [missingArtifactGap]),
   ];
   const payload = exactHeadGitHubEvidencePayloadSchema.parse({
     schemaVersion: 1,

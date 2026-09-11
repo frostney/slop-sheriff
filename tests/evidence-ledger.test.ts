@@ -275,7 +275,10 @@ describe("exact-head evidence replay", () => {
       patchFingerprint: identity.patchFingerprint,
       entries: [],
     };
-    const capabilities = await runCapabilityPreflight(runtime, identity);
+    const capabilities = await runCapabilityPreflight(runtime, identity, {
+      revision: "review-environment-v1", headSha: identity.headSha,
+      inputsDigest: "a".repeat(64), tools: [], completedSteps: [],
+    });
     await writeReviewEvidenceManifest(runtime, manifest);
     const github = prepareExactHeadGitHubEvidence({
       artifactsByRun: new Map(),
@@ -408,7 +411,7 @@ describe("exact-head evidence replay", () => {
     }
   });
 
-  test("records missing generated output once with a repository remedy", () => {
+  test("keeps absent artifacts as availability metadata without a routine gap", () => {
     const prepared = replay({ includeArtifact: false });
 
     expect(prepared.evidence.artifacts).toMatchObject({
@@ -420,9 +423,7 @@ describe("exact-head evidence replay", () => {
         disposition: "check-remedy",
       },
     });
-    expect(prepared.evidence.gaps.map((gap) => gap.id)).toEqual([
-      "exact-head-artifacts-missing",
-    ]);
+    expect(prepared.evidence.gaps.map((gap) => gap.id)).toEqual([]);
   });
 
   test("rejects stale Check and workflow evidence", () => {

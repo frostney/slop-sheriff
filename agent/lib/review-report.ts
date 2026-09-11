@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   beginReportAssembly,
   reportAssemblyIdentitySchema,
+  reviewAxisDecisionsSchema,
   validateReportAssemblyIdentity,
   type ReportAssemblyIdentity,
   type ReportAssemblyState,
@@ -17,6 +18,7 @@ import { reviewFileScopeSchema } from "../../src/review/prepare-review-evidence"
 const reportPlanSchema = z.object({
   kind: z.enum(["full", "delta"]),
   activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
+  axisDecisions: reviewAxisDecisionsSchema.optional(),
   selectedFindingIds: z.array(z.string().regex(/^CR-[1-9]\d*$/)).max(100),
   baselineHead: z.string().nullable(),
 });
@@ -52,6 +54,7 @@ export function reportAssemblyIdentityFromAuth(
     baselineHead: plan.baselineHead,
     reviewPaths,
     activeAxes: plan.activeAxes,
+    ...(plan.axisDecisions ? { axisDecisions: plan.axisDecisions } : {}),
     selectedFindingIds: plan.selectedFindingIds,
   });
 }

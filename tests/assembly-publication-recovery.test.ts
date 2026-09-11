@@ -73,6 +73,15 @@ test("staging failure retains reconciliation work until GitHub has the report", 
       plan: JSON.stringify({ ...identity, kind: "full" }), reviewFiles: [],
     });
     const ctx = { session: { id: "root", auth: { current: auth } }, getSandbox: async () => sandbox } as unknown as Parameters<typeof execute>[1];
+    await expect(execute({ draft: { ...draft, freshFindings: [{
+      severity: "IMPORTANT", category: "QUALITY", title: "Preserve the review evidence",
+      location: { path: "src/review.ts", line: 1, symbol: null },
+      evidence: ["A concrete observation. ".repeat(60)], impact: "The report loses evidence.",
+      impactSummary: "The report loses evidence.", remedy: "Retain the observation.", staticOnly: false, churn: null,
+    }] } }, ctx)).rejects.toThrow("100-word inline limit");
+    expect(writes).toBe(0);
+    expect(report?.report).toBeNull();
+    expect(recovery?.stage).toBe("axes-complete");
     await expect(execute({ draft }, ctx)).rejects.toThrow();
     expect(writes).toBe(1);
     expect(recovery?.stage).toBe("axes-complete");

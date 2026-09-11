@@ -5,12 +5,14 @@ import {
   readLatestReviewState,
   stageReviewPublication,
 } from "../../src/github/publication";
+import { validateFindingPresentation } from "../../src/github/review-presentation";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
 import { readLaneCheckpoint, type LaneCompletedReport } from "../../src/review/lane-checkpoint";
 import { retainSpecialistEvidence } from "../../src/review/specialist-report";
 import {
   assembleCanonicalReviewReport,
   reportAssemblyFailure,
+  ReviewReportValidationError,
 } from "../../src/review/report-assembly";
 import { advanceReviewRecovery } from "../../src/review/recovery";
 import {
@@ -81,12 +83,20 @@ export default defineTool({
         draft: retainSpecialistEvidence(draft, completedReports),
         generatedAt: new Date().toISOString(),
         priorReport: reviewState?.baseline?.report ?? null,
+        priorRuntimeFindingIds: Object.entries(reviewState?.baseline?.findingRuntimeRequirements ?? {})
+          .filter(([, required]) => required).map(([id]) => id),
         state: current,
       });
-      latest = assembled;
       if (!assembled.report) {
         throw new Error("Canonical review report assembly produced no report");
       }
+      for (const finding of assembled.report.findings.filter((finding) => finding.status !== "fixed")) {
+        try { validateFindingPresentation(finding); } catch (error) {
+          throw new ReviewReportValidationError([{ code: "custom", path: ["freshFindings", finding.id] }],
+            error instanceof Error ? error.message : "Finding exceeds its presentation limits");
+        }
+      }
+      latest = assembled;
       reviewReportState.update(() => assembled);
       await stageReviewPublication({
         context: trusted,

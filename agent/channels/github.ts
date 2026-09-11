@@ -1,3 +1,5 @@
+import { validateFindingPresentation } from "../../src/github/review-presentation";
+import type { ReviewReport } from "../../src/review/findings";
 import { connectedGitHubChannel } from "../../src/github/connect-channel";
 import { evidenceSigningKey } from "../../src/review/authenticated-evidence";
 import {
@@ -42,7 +44,8 @@ import { withTrustedReviewContext } from "../../src/github/trusted-context";
 import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
 import { captureMemoryAdmission, requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
-import { activeReviewAxes, reviewAxes } from "../../src/review/axes";
+import { reviewAxes } from "../../src/review/axes";
+import { selectReviewAxes } from "../../src/review/axis-selection";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import { withFreshReviewSessions } from "../../src/github/session-routing";
 import { publishPendingReview } from "../lib/publish-review";
@@ -310,7 +313,8 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     )
     .map((file) => ({ path: file.path, status: file.status }));
   const reviewedPaths = reviewFiles.map((file) => file.path);
-  const configuredAxes = activeReviewAxes(reviewedPaths, config.publicRoots);
+  const configuredAxes = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), config.publicRoots)
+    .filter((decision) => decision.selected).map((decision) => decision.axis);
   const pendingIdentity =
     state.kind === "valid"
       ? state.state.pendingPublication?.identity
@@ -321,8 +325,8 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     failure?.selectedFindingIds ??
     pendingIdentity?.selectedFindingIds ??
     (activeReview.kind === "delta" && deltaDispatch?.priorReport
-      ? findingsToRevalidate(
-          deltaDispatch.priorReport.findings,
+      ? priorFindingsForReview(
+          deltaDispatch.priorReport,
           new Set(deltaDispatch.changedFiles),
         ).map((finding) => finding.id)
       : []);
@@ -337,6 +341,7 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     patchFingerprint,
     plan: JSON.stringify({
       ...plan, activeAxes, selectedFindingIds,
+      ...(pendingIdentity?.axisDecisions ? { axisDecisions: pendingIdentity.axisDecisions } : {}),
       baselineHead: plan.kind === "delta"
         ? pendingIdentity?.baselineHead ?? deltaDispatch?.priorReport?.scope.head
         : null,
@@ -506,7 +511,8 @@ async function dispatchReview(input: {
   const reviewedPaths = dispatch.plan.kind === "delta"
     ? dispatch.changedFiles
     : patchFiles.map((file) => file.path);
-  const activeAxes = activeReviewAxes(reviewedPaths, reviewConfig.publicRoots);
+  const axisDecisions = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), reviewConfig.publicRoots);
+  const activeAxes = axisDecisions.filter((decision) => decision.selected).map((decision) => decision.axis);
   const skippedAxes = reviewAxes.filter((axis) => !activeAxes.includes(axis));
 
   await publishInProgressCheck({
@@ -534,8 +540,8 @@ async function dispatchReview(input: {
 
   const priorFindings =
     dispatch.plan.kind === "delta" && dispatch.priorReport
-      ? findingsToRevalidate(
-          dispatch.priorReport.findings,
+      ? priorFindingsForReview(
+          dispatch.priorReport,
           new Set(dispatch.changedFiles),
         )
       : [];
@@ -548,6 +554,7 @@ async function dispatchReview(input: {
     exactFiles:
       dispatch.plan.kind === "delta" ? dispatch.changedFiles : undefined,
     activeAxes,
+    axisDecisions,
     priorFindings:
       dispatch.plan.kind === "delta" && dispatch.priorReport
         ? { findings: priorFindings }
@@ -566,6 +573,7 @@ async function dispatchReview(input: {
     plan: JSON.stringify({
       ...dispatch.plan,
       activeAxes,
+      axisDecisions,
       selectedFindingIds: priorFindings.map((finding) => finding.id),
       baselineHead: dispatch.plan.kind === "delta" ? dispatch.priorReport?.scope.head : null,
     }),
@@ -762,3 +770,14 @@ export default {
       : route,
   ),
 };
+
+/** Revalidate legacy overlong findings once so an untouched baseline cannot block delivery. */
+function priorFindingsForReview(report: ReviewReport, changedFiles: ReadonlySet<string>) {
+  const selected = new Set(findingsToRevalidate(report.findings, changedFiles).map((finding) => finding.id));
+  return report.findings.filter((finding) => {
+    if (finding.status === "fixed") return false;
+    if (selected.has(finding.id)) return true;
+    try { validateFindingPresentation(finding); return false; }
+    catch { return true; }
+  });
+}

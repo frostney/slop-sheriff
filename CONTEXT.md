@@ -14,10 +14,12 @@ or act as a general-purpose GitHub assistant.
   normalized pull-request patch changed since the baseline.
 - **Revalidation:** a separate evidence pass over selected prior findings. All
   unresolved Blocking/Important findings are selected; Improvements are
-  selected only when their path or symbol is relevant to the delta.
+  selected when their path or symbol is relevant to the delta. Legacy overlong
+  findings are also selected once so their wording can migrate before publication.
 - **Review axis:** exactly one of `deduplication`, `claim-and-specification`,
-  `engineering-quality`, `test-against-spec`, conditional `discoverability`,
-  conditional `test-health`, or conditional `writing-quality`. “Mode”,
+  `engineering-quality`, `test-against-spec`, `discoverability`,
+  `test-health`, or `writing-quality`. The broad engineering-quality core always
+  runs; content-based triage selects specialist axes with recorded reasons. “Mode”,
   “perspective”, and arbitrary lane taxonomies are not synonyms for axes here.
 - **Test against specification:** observation of delivered behavior through a
   real interface against explicit requirements, with each result recorded as
@@ -31,8 +33,8 @@ or act as a general-purpose GitHub assistant.
   implementation; useful tests catch broken behavior and tolerate internal
   refactors. Assertions that mirror implementation details are brittle evidence.
 - **Impact summary:** a consequence summary of at most 300 characters, displayed
-  with expandable full analysis. Presentation changes do not change finding
-  identity.
+  as the final line of a comment capped at 100 words. Full evidence stays in
+  the canonical report; presentation changes do not change finding identity.
 - **Finding lane:** a bounded subagent used only to revalidate selected prior
   findings. It is not a new review axis.
 - **Effective patch:** normalized per-file PR change that ignores file ordering
@@ -42,6 +44,9 @@ or act as a general-purpose GitHub assistant.
   manifest, included patch chunks, and classified-file metadata for one exact
   base, head, and effective-patch fingerprint. An Eve hook creates it after
   root head verification and before the next model step.
+- **Prepared environment:** the shared exact-head checkout with installed
+  toolchains and locked dependencies. A receipt records declaration hashes and
+  observed versions; setup failure prevents lane dispatch.
 - **Evidence ledger:** the immutable application-owned root for one exact
   review identity. Its digest binds the patch bundle, capability inventory,
   exact-head Checks, artifact provenance, common probes, and each typed gap's
