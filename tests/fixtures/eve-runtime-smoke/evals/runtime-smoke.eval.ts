@@ -106,6 +106,18 @@ export default defineEval({
       child.succeeded();
     }
 
+    const scoutRecoverySession = t.newSession();
+    const recoveredScout = await scoutRecoverySession.send("KGR-EVAL-AUTHORED-ROOT KGR-EVAL-SCOUT-PROSE");
+    recoveredScout.expectOk();
+    recoveredScout.messageIncludes("AUTHORED-REVIEW-COMPLETE");
+    recoveredScout.noFailedActions();
+    const recoveryChildren = recoveredScout.events.filter((event) => event.type === "subagent.called");
+    if (recoveryChildren.length !== 6) throw new Error("Expected one failed scout, one receipt retry, and no replacement completed lanes");
+    const retriedScout = recoveryChildren.find((event) => event.data.callId.endsWith(":receipt-retry"));
+    if (!retriedScout) throw new Error("Scout output failure never reached application recovery");
+    const retrySession = await t.target.attachSession(retriedScout.data.childSessionId);
+    retrySession.succeeded();
+
     const repeated = await t.send("KGR-EVAL-AUTHORED-REPEAT");
     repeated.messageIncludes("AUTHORED-REPLAY-COMPLETE");
     repeated.noFailedActions();

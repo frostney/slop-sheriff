@@ -72,6 +72,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (prompt.includes("KGR-EVAL-AUTHORED-CHILD")) {
     const route = parseSubagentRoute(request.userMessages.map((content) => ({ role: "user", content })));
+    // Recorded PR43 shape: the scout stops with prose instead of final_output.
+    if (route.role === "scout" && prompt.includes("KGR-EVAL-SCOUT-PROSE") && !prompt.includes("Receipt recovery:")) return "Request: lookup. Evidence: found-symbol. Limitations: none.";
     if (route.role === "scout") return { toolCalls: [{ name: "final_output", input: { request: "lookup", evidence: "found-symbol", limitations: [] } }] };
     if (route.role !== "lane") throw new Error("Invalid authored child route");
     if (route.attempt === 1 && !prompt.includes("found-symbol")) throw new Error("Fresh continuation lost scout evidence");
@@ -92,7 +94,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (prompt.includes("KGR-EVAL-AUTHORED-ROOT")) {
     if (!hasToolResult(request, "fixture_prepare")) return { toolCalls: [{ name: "fixture_prepare", input: {} }] };
     const result = request.toolResults.find((item) => item.name === "review_workflow");
-    if (!result) return { toolCalls: [{ name: "review_workflow", input: { context: "Synthetic review claim" } }] };
+    if (!result) return { toolCalls: [{ name: "review_workflow", input: { context: prompt.includes("KGR-EVAL-SCOUT-PROSE") ? "KGR-EVAL-SCOUT-PROSE" : "Synthetic review claim" } }] };
     if (result.isError || !JSON.stringify(result.output).includes('"complete":true')) throw new Error("Authored review failed: " + JSON.stringify(result.output));
     return "AUTHORED-REVIEW-COMPLETE";
   }

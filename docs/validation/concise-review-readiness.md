@@ -7,7 +7,7 @@ model-quality, latency, token or cost improvements.
 
 ## Observed checks
 
-- `bun run check`: 324 tests, 92 deterministic Eve runtime gates, discovery with
+- `bun run check`: 331 tests, 95 deterministic Eve runtime gates, discovery with
   zero errors, TypeScript and production build passed without provider credentials.
 - `bun run replay:pr61`: all four recorded review lifecycle transitions preserved.
   Its timing projections remain offline projections, not new measurements.
@@ -68,10 +68,28 @@ churn was the GitHub channel (15 touches, 916 additions/152 deletions), publicat
 (271 additions/31 deletions). Remaining symbols used file-level fallback. These hotspots informed the delivery recovery and
 trusted-state tests; churn alone was not treated as a defect.
 
-## Release boundary
+## PR43 production failure and recovery
 
-The booking URL is intentionally absent until the owner creates it. The landing
-includes the custom installation and integration offer. No new paid model review
-or production deployment is part of this validation. Keep the candidate draft
-until a deployment and model canary are deliberately selected, so readiness does
-not accidentally invoke the older deployed reviewer.
+The ready-for-review event ran production deployment
+`dpl_7RADrpRv2KFeUz1UmALKNeMJGeEF` from base commit `35c0e63`, reviewing candidate
+`6fd33c2`. The candidate's setup and presentation changes were not deployed.
+Session `wrun_41M28BEBBH0GH8CSPEWW0VCP2R` stopped on 11 September 2026 at
+13:48 UTC with five completed axes and no published verdict.
+
+The discoverability scout ended with prose instead of the requested structured
+result. Eve emitted `OUTPUT_SCHEMA_NOT_FULFILLED`; `ctx.agent` rejected with
+a serialized `SUBAGENT_EXECUTION_FAILED` envelope carrying that exact message. The fail-fast orchestration discarded
+its waiting hook while engineering quality was still completing. This was an
+execution failure, not a negative review verdict or successful coverage.
+
+The regression uses that recorded error envelope and a native Eve `mockModel`
+scout that stops with prose. Scout policy now explicitly requires `final_output`.
+One output-contract retry uses a new dispatch key within the existing ceiling;
+other failures remain terminal, and failed evidence never becomes a successful
+receipt. All dispatched siblings settle before orchestration reports failure,
+so their durable checkpoints remain available to recovery. Exact request identity,
+checkpoint signatures and final report validation remain required.
+
+The booking URL remains absent until the owner creates it. Provider-free checks
+prove error recovery and contract preservation; live model quality still requires
+a deployed candidate and a deliberate paid canary.

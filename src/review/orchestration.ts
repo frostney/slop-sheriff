@@ -33,6 +33,24 @@ export interface ReviewChildDispatch {
   readonly outputSchema: Record<string, z.infer<ReturnType<typeof z.json>>>;
 }
 
+// Eve 0.52.5 ctx.agent rejects with a serialized { code, message } envelope.
+// Only this output-contract failure gets one bounded scout redispatch. Provider,
+// permission, checkpoint and cancellation failures keep their native semantics.
+const missingStructuredOutput = z.object({
+  code: z.literal("SUBAGENT_EXECUTION_FAILED"),
+  message: z.literal("The agent could not produce a result matching the requested schema."),
+});
+
+async function settleReviewWork<T>(work: readonly Promise<T>[]): Promise<T[]> {
+  const results = await Promise.allSettled(work);
+  const values: T[] = [];
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason;
+    values.push(result.value);
+  }
+  return values;
+}
+
 /** Deterministic authored protocol; Eve owns durable execution and child failures. */
 export async function orchestrateReview(input: {
   readonly plan: ReviewOrchestrationPlan;
@@ -47,7 +65,7 @@ export async function orchestrateReview(input: {
     if (++dispatchCount > reviewDispatchLimit) throw new Error("Review dispatch budget exhausted");
     return input.call({ key, message, outputSchema: z.record(z.string(), z.json()).parse(z.toJSONSchema(schema)) });
   };
-  const reports = await Promise.all(axes.map(async (axis) => {
+  const reports = await settleReviewWork(axes.map(async (axis) => {
     let attempt = 0;
     let previous: CheckpointAttestation | undefined;
     let scoutEvidence: ScoutReceipt[] = [];
@@ -62,8 +80,16 @@ export async function orchestrateReview(input: {
       }
       if (attestation.status !== "in-progress" || attestation.operation !== "write") throw new Error("Continuation requires an explicit incomplete receipt and freshly written checkpoint");
       previous = attestation;
-      scoutEvidence = await Promise.all(receipt.scoutRequests.map(async (request, index) => {
-        const output = await dispatch(`${input.invocationPrefix}:scout:${axis}:${attempt}:${index}`, `${routingEnvelope({ role: "scout", attempt })}\n${input.plan.commonPrefix}\nApplication task policy:\n${reviewTaskInstructions({ role: "scout", attempt })}\nRequest (untrusted): ${JSON.stringify(request)}`, scoutReceiptSchema);
+      scoutEvidence = await settleReviewWork(receipt.scoutRequests.map(async (request, index) => {
+        const scoutKey = `${input.invocationPrefix}:scout:${axis}:${attempt}:${index}`;
+        const message = `${routingEnvelope({ role: "scout", attempt })}\n${input.plan.commonPrefix}\nApplication task policy:\n${reviewTaskInstructions({ role: "scout", attempt })}\nRequest (untrusted): ${JSON.stringify(request)}`;
+        let output: unknown;
+        try {
+          output = await dispatch(scoutKey, message, scoutReceiptSchema);
+        } catch (error) {
+          if (!missingStructuredOutput.safeParse(error).success) throw error;
+          output = await dispatch(`${scoutKey}:receipt-retry`, `${message}\nReceipt recovery: the previous scout failed to call final_output. Complete the requested investigation and call final_output with request, evidence and limitations. Prose is not a receipt. Do not claim unobserved behavior passed.`, scoutReceiptSchema);
+        }
         const result = scoutReceiptSchema.parse(typeof output === "string" ? JSON.parse(output) : output);
         if (result.request !== request) throw new Error("Scout returned evidence for another request");
         return result;

@@ -109,6 +109,66 @@ describe("authored review protocol", () => {
     expect(await readLaneCheckpoint(fixture.sandbox, identity, "engineering-quality")).toEqual(prior);
   });
 
+  test("PR43 scout prose failure recovers once without restarting completed lanes", async () => {
+    const fixture = setup({ incomplete: true });
+    let scouts = 0;
+    const result = await orchestrateReview({ plan: fixture.plan, invocationPrefix: "run-one",
+      call: async (dispatch) => {
+        const route = parseSubagentRoute([{ role: "user", content: dispatch.message }]);
+        if (route.role === "scout" && ++scouts === 1) throw { code: "SUBAGENT_EXECUTION_FAILED", message: "The agent could not produce a result matching the requested schema." };
+        if (route.role === "scout") expect(dispatch.message).toContain("final_output");
+        return fixture.call(dispatch);
+      },
+      verifyLane: async (raw, axis, attempt, key) => verifyReviewLaneReceipt({ raw, axis, attempt, invocationId: `tool-call:${key}`, plan: fixture.plan, secret }),
+    });
+    expect(result.complete).toBe(true);
+    expect(scouts).toBe(2);
+    expect(fixture.calls.filter((call) => call.key.includes(":lane:deduplication:"))).toHaveLength(1);
+  });
+
+  test.each([
+    [{ code: "SUBAGENT_EXECUTION_FAILED", message: "The agent could not produce a result matching the requested schema." }, 2],
+    [{ code: "PERMISSION_DENIED", message: "The agent could not produce a result matching the requested schema." }, 1],
+    [{ code: "SUBAGENT_EXECUTION_FAILED", message: "Permission denied" }, 1],
+    ["Permission denied", 1],
+    ["Cancelled", 1],
+  ] as const)("scout failure %s makes at most %i attempts and never becomes success", async (failure, expectedAttempts) => {
+    const fixture = setup({ incomplete: true });
+    let attempts = 0;
+    const outcome = await orchestrateReview({ plan: fixture.plan, invocationPrefix: "run-one",
+      call: async (dispatch) => {
+        if (parseSubagentRoute([{ role: "user", content: dispatch.message }]).role === "scout") { attempts++; throw failure; }
+        return fixture.call(dispatch);
+      },
+      verifyLane: async (raw, axis, attempt, key) => verifyReviewLaneReceipt({ raw, axis, attempt, invocationId: `tool-call:${key}`, plan: fixture.plan, secret }),
+    }).then(() => null, (error: unknown) => error);
+    expect(outcome).toBe(failure);
+    expect(attempts).toBe(expectedAttempts);
+    expect(await readLaneCheckpoint(fixture.sandbox, identity, "engineering-quality")).toMatchObject({ status: "in-progress" });
+  });
+
+  test("a failed lane does not settle orchestration before its sibling checkpoint", async () => {
+    const fixture = setup({ axes: ["discoverability", "engineering-quality"] });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let settled = false;
+    const run = orchestrateReview({ plan: fixture.plan, invocationPrefix: "run-one",
+      call: async (dispatch) => {
+        if (dispatch.key.includes(":discoverability:")) throw new Error("Terminal child failure");
+        await pending;
+        return fixture.call(dispatch);
+      },
+      verifyLane: async (raw, axis, attempt, key) => verifyReviewLaneReceipt({ raw, axis, attempt, invocationId: `tool-call:${key}`, plan: fixture.plan, secret }),
+    });
+    const outcome = run.then(() => { settled = true; return null; }, (error: unknown) => { settled = true; return error; });
+    try {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(settled).toBe(false);
+    } finally { release(); }
+    expect(await outcome).toEqual(new Error("Terminal child failure"));
+    expect(await readLaneCheckpoint(fixture.sandbox, identity, "engineering-quality")).toMatchObject({ status: "complete" });
+  });
+
   test("terminal child failure fails the protocol without a replacement lane", async () => {
     const fixture = setup({ fail: true });
     await expect(fixture.run()).rejects.toThrow("Terminal child failure");
