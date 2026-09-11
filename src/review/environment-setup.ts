@@ -58,8 +58,8 @@ export function systemPackages(debian: string, rpm = debian): string {
 // still declare HTTP apt mirrors, so normalize those before any apt consumer.
 export const httpsAptSourcesCommand = [
   // Avoid pipelined requests stalling behind the sandbox's domain firewall.
-  "sudo mkdir -p /etc/apt/apt.conf.d",
-  "printf '%s\\n' 'Acquire::http::Pipeline-Depth \"0\";' 'Acquire::https::Pipeline-Depth \"0\";' 'APT::Update::Error-Mode \"any\";' | sudo tee /etc/apt/apt.conf.d/99-review-network >/dev/null",
+  "sudo mkdir -p /etc/apt/apt.conf.d /var/lib/slop-sheriff/apt/lists/partial",
+  "printf '%s\\n' 'Acquire::ForceIPv4 \"true\";' 'Acquire::http::Pipeline-Depth \"0\";' 'Acquire::https::Pipeline-Depth \"0\";' 'Acquire::http::Timeout \"15\";' 'Acquire::https::Timeout \"15\";' 'Acquire::Retries \"2\";' 'APT::Update::Error-Mode \"any\";' 'Dir::State::lists \"/var/lib/slop-sheriff/apt/lists\";' | sudo tee /etc/apt/apt.conf.d/99-review-network >/dev/null",
   "for review_apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do",
   "[ -f \"$review_apt_source\" ] || continue",
   "sudo sed -i -E 's#http://((archive|security|ports)\\.ubuntu\\.com|deb\\.debian\\.org|security\\.debian\\.org)/#https://\\1/#g' \"$review_apt_source\"",

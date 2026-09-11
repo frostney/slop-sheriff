@@ -30,7 +30,7 @@ export const reviewNetworkPolicy: SandboxNetworkPolicy = {
     "astral.sh", "releases.astral.sh", "pypi.org", "files.pythonhosted.org",
     "sh.rustup.rs", "static.rust-lang.org", "index.crates.io", "static.crates.io", "crates.io",
     "proxy.golang.org", "sum.golang.org", "go.dev", "dl.google.com", "storage.googleapis.com",
-    "cdn.playwright.dev", "playwright.download.prss.microsoft.com", "cdn.puppeteer.dev",
+    "cdn.playwright.dev", "playwright.download.prss.microsoft.com", "cdn.puppeteer.dev", "googlechromelabs.github.io",
   ],
   subnets: { deny: [...privateSubnets] },
 };

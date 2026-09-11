@@ -24,6 +24,23 @@ model-quality, latency, token or cost improvements.
   delivery failures, retry without duplicate replies, and corrected revalidation
   after rejected overlong or unsupported results.
 
+## Hosted setup
+
+A fresh Vercel sandbox using Eve's pinned `0.52.5` base image and the final
+restricted network policy completed bootstrap, Node `24.21.0`, Bun `1.4.2`,
+frozen repository dependencies, and native `agent-browser 0.37.1` installation.
+Chromium opened and closed successfully; 39 landing, specialist and thread
+contract tests passed at target `ff30cad`. Total observed setup and probe time
+was 147,436 ms. The probe used detached command streaming like Eve and called
+no model. The sandbox and its orphan snapshots were deleted afterward.
+
+The final setup uses HTTPS apt mirrors, IPv4 transport, bounded network retries,
+fresh application-owned indexes, and Chrome's official manifest/download hosts.
+Earlier cold runs stalled; these observations do not isolate one setting as the
+cause or prove latency parity. One diagnostic refresh interfered with another
+installer's archive cleanup; that run was discarded and the successful probe
+ran without competing package operations.
+
 ## Historical thread repair
 
 PR42's exact merged head `2c500ed73a116935593b7d070f1a9b49292ad316` passed
