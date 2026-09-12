@@ -1,3 +1,4 @@
+import { reviewPolicyDigest } from "../../src/config/review-policy-identity";
 import { validateFindingPresentation } from "../../src/github/review-presentation";
 import type { ReviewReport } from "../../src/review/findings";
 import { connectedGitHubChannel } from "../../src/github/connect-channel";
@@ -40,11 +41,15 @@ import {
   writeReviewState,
 } from "../../src/github/publication";
 import { pendingReviewState } from "../../src/github/review-state";
+import { dismissFinding, parseFindingDismissal } from "../../src/github/finding-dismissal";
+import { beginCurrentHeadReview } from "../../src/github/review-progress";
 import { withTrustedReviewContext } from "../../src/github/trusted-context";
 import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
 import { captureMemoryAdmission, requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
-import { reviewAxes } from "../../src/review/axes";
+import { projectLaneRegistryDigest } from "../../src/review/project-lane-identity";
+import { reviewLaneRegistry } from "../../src/review/project-lanes";
+import { validateConfiguredAxes } from "../../src/config/trusted-review-config";
 import { selectReviewAxes } from "../../src/review/axis-selection";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import { withFreshReviewSessions } from "../../src/github/session-routing";
@@ -135,6 +140,16 @@ async function fetchTrustedConfig(
       throw error;
     }
   });
+}
+
+async function fetchTrustedVoiceGuide(ctx: GitHubInboundContext, baseSha: string, configSource: string): Promise<string> {
+  const path = parseReviewConfig(configSource).voiceGuide;
+  if (!path) return "";
+  const response = await ctx.github.request({ method: "GET", path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(baseSha)}` });
+  const file = contentSchema.parse(response.body);
+  const content = Buffer.from(file.content.replaceAll("\n", ""), "base64").toString("utf8");
+  if (Buffer.byteLength(content, "utf8") > 16_000) throw new Error("Trusted voice guide exceeds 16,000 bytes");
+  return content;
 }
 
 async function fetchReviewState(
@@ -313,7 +328,8 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     )
     .map((file) => ({ path: file.path, status: file.status }));
   const reviewedPaths = reviewFiles.map((file) => file.path);
-  const configuredAxes = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), config.publicRoots)
+  const configuredDecisions = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), config.publicRoots, config.lanes);
+  const configuredAxes = configuredDecisions
     .filter((decision) => decision.selected).map((decision) => decision.axis);
   const pendingIdentity =
     state.kind === "valid"
@@ -321,6 +337,9 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
       : undefined;
   const activeAxes =
     failure?.activeAxes ?? pendingIdentity?.activeAxes ?? configuredAxes;
+  validateConfiguredAxes(activeAxes, config);
+  const priorRegistryDigest = failure?.laneRegistryDigest ?? pendingIdentity?.laneRegistryDigest;
+  if ((failure || pendingIdentity) && priorRegistryDigest !== projectLaneRegistryDigest(config)) throw new Error("Recovered lanes do not match the trusted base registry");
   const selectedFindingIds =
     failure?.selectedFindingIds ??
     pendingIdentity?.selectedFindingIds ??
@@ -335,13 +354,16 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
   const auth = withTrustedReviewContext(defaultGitHubAuth(ctx), {
     baseSha: pullRequest.base.sha,
     configSource,
+    voiceGuideContent: await fetchTrustedVoiceGuide(ctx, pullRequest.base.sha, configSource),
     event: "review-control-response",
     ...(memoryAdmission ? { memoryAdmission } : {}),
     headSha: pullRequest.head.sha,
     patchFingerprint,
     plan: JSON.stringify({
       ...plan, activeAxes, selectedFindingIds,
-      ...(pendingIdentity?.axisDecisions ? { axisDecisions: pendingIdentity.axisDecisions } : {}),
+      axisDecisions: pendingIdentity?.axisDecisions ?? configuredDecisions.map(decision => ({
+        ...decision, selected: activeAxes.includes(decision.axis),
+      })),
       baselineHead: plan.kind === "delta"
         ? pendingIdentity?.baselineHead ?? deltaDispatch?.priorReport?.scope.head
         : null,
@@ -424,6 +446,10 @@ async function dispatchReview(input: {
     repositoryDetails.repositoryId,
     repositoryDetails.repositoryCreatedAt,
   );
+  if (state.kind === "valid" && state.state.baseline?.head !== pullRequest.head.sha) {
+    await writeReviewState(githubAdapter(contextWithoutPatch.installationId).octokit,
+      contextWithoutPatch, beginCurrentHeadReview(state.state, pullRequest.head.sha));
+  }
   let reviewConfig;
   try {
     reviewConfig = parseReviewConfig(configSource);
@@ -431,6 +457,8 @@ async function dispatchReview(input: {
     await validateConfiguredModels(reviewConfig);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (state.kind === "valid") await writeReviewState(githubAdapter(contextWithoutPatch.installationId).octokit,
+      contextWithoutPatch, beginCurrentHeadReview(state.state, pullRequest.head.sha, "failed"));
     await publishFailClosedCheck({
       context: contextWithoutPatch,
       message,
@@ -439,7 +467,9 @@ async function dispatchReview(input: {
     return null;
   }
 
+  const policyDigest = reviewPolicyDigest(configSource, pullRequest.base.sha);
   const dispatch = planDispatch({
+    reviewPolicyDigest: policyDigest,
     action: input.action,
     draft: pullRequest.draft,
     head: pullRequest.head.sha,
@@ -452,7 +482,7 @@ async function dispatchReview(input: {
     patchFiles,
     state,
   });
-  const context = publicationContext(
+  const context = { ...publicationContext(
     input.ctx,
     pullRequestNumber,
     pullRequest.base.sha,
@@ -460,10 +490,12 @@ async function dispatchReview(input: {
     repositoryDetails.repositoryId,
     repositoryDetails.repositoryCreatedAt,
     dispatch.patchFingerprint,
-  );
+  ), reviewPolicyDigest: policyDigest };
   const octokit = githubAdapter(context.installationId).octokit;
 
   if (dispatch.plan.kind === "fail-closed") {
+    if (state.kind === "valid") await writeReviewState(octokit, context,
+      beginCurrentHeadReview(state.state, pullRequest.head.sha, "failed"));
     await publishFailClosedCheck({
       context,
       message:
@@ -511,11 +543,12 @@ async function dispatchReview(input: {
   const reviewedPaths = dispatch.plan.kind === "delta"
     ? dispatch.changedFiles
     : patchFiles.map((file) => file.path);
-  const axisDecisions = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), reviewConfig.publicRoots);
+  const axisDecisions = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), reviewConfig.publicRoots, reviewConfig.lanes);
   const activeAxes = axisDecisions.filter((decision) => decision.selected).map((decision) => decision.axis);
-  const skippedAxes = reviewAxes.filter((axis) => !activeAxes.includes(axis));
+  const skippedAxes = reviewLaneRegistry(reviewConfig).map((lane) => lane.id).filter((axis) => !activeAxes.includes(axis));
 
   await publishInProgressCheck({
+    config: reviewConfig,
     activeAxes,
     context,
     octokit,
@@ -526,17 +559,13 @@ async function dispatchReview(input: {
     skippedAxes,
   });
 
-  if (dispatch.plan.kind === "full" && dispatch.plan.reason === "initial") {
-    await writeReviewState(
-      octokit,
-      context,
-      pendingReviewState({
-        publication: reviewConfig,
-        pullRequest: pullRequestNumber,
-        status: dispatch.plan.delaySeconds === 600 ? "debouncing" : "running",
-      }),
-    );
-  }
+  const status = dispatch.plan.kind === "full" && dispatch.plan.delaySeconds === 600 ? "debouncing" : "running";
+  const previousState = state.kind === "valid" ? state.state : pendingReviewState({
+    publication: reviewConfig, pullRequest: pullRequestNumber, status,
+  });
+  await writeReviewState(octokit, context, {
+    ...beginCurrentHeadReview(previousState, pullRequest.head.sha, status), publication: reviewConfig,
+  });
 
   const priorFindings =
     dispatch.plan.kind === "delta" && dispatch.priorReport
@@ -564,6 +593,7 @@ async function dispatchReview(input: {
   const auth = withTrustedReviewContext(defaultGitHubAuth(input.ctx), {
     baseSha: pullRequest.base.sha,
     configSource,
+    voiceGuideContent: await fetchTrustedVoiceGuide(input.ctx, pullRequest.base.sha, configSource),
     event: input.action,
     ...(memoryAdmission ? { memoryAdmission } : {}),
     headSha: pullRequest.head.sha,
@@ -608,6 +638,36 @@ async function onPullRequest(
 
 async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
   if (ctx.conversation.kind !== "pull_request") {
+    return null;
+  }
+  const dismissal = parseFindingDismissal(comment.body);
+  if (dismissal) {
+    const authorized = await hasReviewControlPermission(ctx);
+    if (!authorized) {
+      await ctx.thread.post("Dismissing a finding requires write, maintain, or admin repository permission.");
+      return null;
+    }
+    const pullRequestNumber = ctx.conversation.pullRequestNumber;
+    if (!pullRequestNumber) return null;
+    try {
+      const pullRequest = await fetchPullRequest(ctx, pullRequestNumber);
+      if (pullRequest.state !== "open" || pullRequest.draft) throw new Error("The pull request must be open and ready for review.");
+      const [repository, state, source, patchFiles] = await Promise.all([
+        fetchRepositoryDetails(ctx), fetchReviewState(ctx, pullRequestNumber),
+        fetchTrustedConfig(ctx, pullRequest.base.sha), fetchPatchFiles(ctx, pullRequestNumber),
+      ]);
+      if (state.kind !== "valid") throw new Error("No verified review state is available.");
+      const report = dismissFinding({ command: dismissal, authorized, actor: ctx.sender.login,
+        commentId: comment.id, baseSha: pullRequest.base.sha, headSha: pullRequest.head.sha, state: state.state });
+      const context = publicationContext(ctx, pullRequestNumber, pullRequest.base.sha, pullRequest.head.sha,
+        repository.repositoryId, repository.repositoryCreatedAt, effectivePatchFingerprint(patchFiles));
+      await publishReview({ config: parseReviewConfig(source), report,
+        octokit: githubAdapter(context.installationId).octokit, context,
+      });
+    } catch (error) {
+      console.error("Slop Sheriff finding dismissal failed", error);
+      await ctx.thread.post("The dismissal could not be applied to a completed current-head review. Its finding remains unchanged unless the updated review summary confirms the dismissal.");
+    }
     return null;
   }
   if (!requestsManualFullReview(comment.body)) {

@@ -1,3 +1,4 @@
+import { prepareRequirementInventory, readRequirementSource } from "./requirements";
 import { createHash, randomUUID } from "node:crypto";
 import type { RuntimeSandboxSession } from "eve/sandbox";
 import { Tiktoken } from "js-tiktoken/lite";
@@ -167,6 +168,8 @@ async function preparedLedger(
   });
   if (ledgerSource === null) return null;
   const ledger = await readReviewEvidenceLedger(sandbox, identity);
+  if (!ledger.requirements) return null;
+  for (const source of ledger.requirements) await readRequirementSource(sandbox, identity.patchFingerprint, ledger.requirements, source.id);
   const manifest = await readReviewEvidenceManifest(sandbox, identity);
   if (!matchesPreparedScope(manifest, files)) {
     throw new Error("Prepared evidence ledger does not match the exact file scope");
@@ -215,7 +218,7 @@ async function prepareReviewEvidenceOnce(
   input: {
     readonly collectGitHubEvidence: () => Promise<PreparedGitHubEvidence>;
     readonly collectMemory: (query: string) => Promise<MemoryAvailability>;
-    readonly config: Pick<ReviewConfig, "embedding"> & Partial<Pick<ReviewConfig, "publicRoots">>;
+    readonly config: Pick<ReviewConfig, "embedding"> & Partial<Pick<ReviewConfig, "publicRoots" | "requirementPaths" | "lanes">>;
     readonly planKind: "full" | "delta";
     readonly workspaceDependencies?: ReviewWorkspaceDependencies;
   },
@@ -350,6 +353,9 @@ async function prepareReviewEvidenceOnce(
     entries,
   });
   await writeReviewEvidenceManifest(sandbox, manifest);
+  const requirements = await prepareRequirementInventory(sandbox, {
+    ...identity, paths: files.map((file) => file.path), config: input.config,
+  });
   const setup = await prepareReviewEnvironment(sandbox, identity, {
     paths: files.map((file) => file.path),
     publicRoots: input.config.publicRoots ?? [],
@@ -440,6 +446,7 @@ async function prepareReviewEvidenceOnce(
     identity,
     manifest,
     probes,
+    requirements,
   });
   await writeReviewEvidenceLedger(sandbox, ledger);
   console.info(

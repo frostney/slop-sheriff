@@ -79,10 +79,10 @@ export function landingPage(indexable: boolean, sourceRevision?: string): string
 <div class="caption"><span>GitHub pull requests. A little frontier spirit.</span><span>Self-hosted · Review-only · Advisory by default</span></div>
 </section>
 <section class="section wrap" id="lanes" aria-labelledby="lanes-title">
-<div class="section-intro"><div><p class="eyebrow">01 / A posse with a purpose</p><h2 id="lanes-title">Different trails.<br>One review.</h2></div><p>Review lanes cover design, requirements, correctness, and tests. Specialists join for discoverability and writing when the change needs them.</p></div>
+<div class="section-intro"><div><p class="eyebrow">01 / A posse with a purpose</p><h2 id="lanes-title">Different trails.<br>One review.</h2></div><p>Focused lanes check requirements, correctness, tests, and documentation. Add project-specific lanes through repository configuration.</p></div>
 </section>
 <section class="section wrap" id="review" aria-labelledby="review-title">
-<div class="review-layout"><div class="review-copy"><p class="eyebrow">02 / Show your work, partner</p><h2 id="review-title">A real catch.<br>A short comment.</h2><p>From our own <a href="${exampleFindingSource}">PR #42</a>, condensed into today’s comment format. The alias indexing issue was subsequently fixed.</p><p>Each finding uses at most 100 words. Set <code>personality: false</code> to skip the cowboy opener.</p></div>
+<div class="review-layout"><div class="review-copy"><p class="eyebrow">02 / Show your work, partner</p><h2 id="review-title">A real catch.<br>A short comment.</h2><p>From our own <a href="${exampleFindingSource}">PR #42</a>, condensed into today’s comment format. The alias indexing issue was subsequently fixed.</p><p>A short explanation, visible Impact and Risk, and expandable evidence. Choose theatrical, understated, or plain technical language.</p></div>
 <article class="review" aria-label="Historical review finding from pull request 42"><header class="review-head"><img src="/assets/slop-sheriff-icon.png" alt="" width="38" height="38" loading="lazy"><div><strong>Slop Sheriff <span class="bot-badge">bot</span></strong><small><a href="${exampleFindingSource}">PR #42 · View original comment</a></small></div></header><div class="review-file"><code>src/landing/routes.ts</code> · original line 31</div><div class="review-body">${findingBodyHtml(exampleFinding)}</div></article>
 </div>
 </section>
@@ -90,7 +90,7 @@ export function landingPage(indexable: boolean, sourceRevision?: string): string
 <div class="install-layout"><div><p class="eyebrow">03 / Your ranch. Your rules.</p><h2 id="install-title">Give the Sheriff<br>a place to hang<br>its hat.</h2></div><div><p>Deploy with your own GitHub App, Vercel, Convex, and AI Gateway access. Choose the repositories; pay the services you use.</p><div class="actions"><a class="button" href="${installGuideUrl}">Follow the setup guide <span aria-hidden="true">↗</span></a></div></div></div>
 </div></section>
 <section class="custom-install wrap" aria-labelledby="custom-title"><h2 id="custom-title">Custom installations and integrations</h2><p>Custom setup, deployment support, and tailored integrations for your team’s workflow.</p></section>
-<section class="limits wrap" aria-label="Permissions and limitations"><p>Review-only and advisory by default. The Sheriff writes comments and Checks. It never pushes branches or merges pull requests.</p><p>Models can miss bugs or raise false positives. Humans make the decisions. Review coverage and execution limitations stay visible.</p></section>
+<section class="limits wrap" aria-label="Permissions and limitations"><p>Review-only and advisory by default. The Sheriff writes comments and Checks. It never pushes branches or merges pull requests.</p><p>Models can miss bugs or raise false positives. Humans make the decisions. Incomplete reviews never give merge clearance.</p></section>
 </main>
 <footer class="footer wrap"><p><span class="star" aria-hidden="true">★</span> Slop Sheriff. Follow the evidence.</p><div class="footer-links"><a href="${repositoryUrl}">Source on GitHub ↗</a><a href="${installGuideUrl}">Self-hosting guide ↗</a></div></footer>
 </body>

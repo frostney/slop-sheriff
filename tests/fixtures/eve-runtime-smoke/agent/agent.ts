@@ -76,6 +76,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (route.role === "scout" && prompt.includes("KGR-EVAL-SCOUT-PROSE") && !prompt.includes("Receipt recovery:")) return "Request: lookup. Evidence: found-symbol. Limitations: none.";
     if (route.role === "scout") return { toolCalls: [{ name: "final_output", input: { request: "lookup", evidence: "found-symbol", limitations: [] } }] };
     if (route.role !== "lane") throw new Error("Invalid authored child route");
+    if (route.axis === "project-api" && !prompt.includes("Preserve the documented wire envelope.")) throw new Error("Project API criteria missing");
+    if (route.axis === "project-accessibility" && !prompt.includes("Every interactive control has an accessible name.")) throw new Error("Project accessibility criteria missing");
     if (route.attempt === 1 && !prompt.includes("found-symbol")) throw new Error("Fresh continuation lost scout evidence");
     if (!hasToolResult(request, "fixture_checkpoint")) return { toolCalls: [{ name: "fixture_checkpoint", input: {} }] };
     const checkpointResult = request.toolResults.find((item) => item.name === "fixture_checkpoint");
@@ -94,7 +96,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (prompt.includes("KGR-EVAL-AUTHORED-ROOT")) {
     if (!hasToolResult(request, "fixture_prepare")) return { toolCalls: [{ name: "fixture_prepare", input: {} }] };
     const result = request.toolResults.find((item) => item.name === "review_workflow");
-    if (!result) return { toolCalls: [{ name: "review_workflow", input: { context: prompt.includes("KGR-EVAL-SCOUT-PROSE") ? "KGR-EVAL-SCOUT-PROSE" : "Synthetic review claim" } }] };
+    if (!result) return { toolCalls: [{ name: "review_workflow", input: { context: prompt.includes("KGR-EVAL-PROJECT-LANES") ? "KGR-EVAL-PROJECT-LANES" : prompt.includes("KGR-EVAL-SCOUT-PROSE") ? "KGR-EVAL-SCOUT-PROSE" : "Synthetic review claim" } }] };
     if (result.isError || !JSON.stringify(result.output).includes('"complete":true')) throw new Error("Authored review failed: " + JSON.stringify(result.output));
     return "AUTHORED-REVIEW-COMPLETE";
   }

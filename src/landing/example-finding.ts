@@ -10,9 +10,11 @@ export const exampleFinding: ReviewFinding = {
   category: "CLAIM",
   title: "Do not block crawlers from seeing the alias noindex directive",
   location: { path: "src/landing/routes.ts", line: 31, symbol: "landingResponse" },
+  introduction: "Well, my circuits found a standoff: robots.txt blocks crawlers from reading the alias’s noindex directive. Both controls look sensible alone, partner, but together they prevent the indexing rule from doing its job.",
+  principle: "Google requires crawler access to discover and honor a noindex directive.",
+  risk: "Linked alias URLs can appear in search results while crawlers remain unable to read noindex.",
   evidence: [
     "A production-alias probe returned robots.txt Disallow: / alongside HTML and X-Robots-Tag noindex directives.",
-    "Blocking crawl prevents discovery of noindex; Google can still list linked URLs.",
   ],
   impact: "A production alias can appear as a URL-only search result because robots.txt blocks crawlers from seeing noindex, weakening canonical-host-only indexing.",
   impactSummary: "A production alias can appear as a URL-only search result because robots.txt blocks crawlers from seeing noindex, weakening canonical-host-only indexing.",

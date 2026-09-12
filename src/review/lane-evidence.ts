@@ -1,3 +1,4 @@
+import { requirementObligationIdentities, requirementsForAxis } from "./requirements";
 import { readCapabilityPreflight } from "./capability-preflight";
 import {
   readNextReviewEvidencePacket,
@@ -25,6 +26,7 @@ export async function readLaneReviewEvidencePacket(
   sessionId: string,
 ) {
   const ledger = await readReviewEvidenceLedger(sandbox, identity);
+  const requirements = requirementsForAxis(ledger.requirements ?? [], axis);
   const capabilityPreflight = await readCapabilityPreflight(sandbox, manifest);
   validateReviewEvidenceLedgerComponents(ledger, {
     capabilities: capabilityPreflight,
@@ -42,7 +44,7 @@ export async function readLaneReviewEvidencePacket(
     axis,
   );
   if (checkpoint) {
-    validateLaneCheckpointCoverage(checkpoint, manifest.entries.length);
+    validateLaneCheckpointCoverage(checkpoint, manifest.entries.length, requirements.map((source) => source.id), requirementObligationIdentities(requirements));
   }
   const packet = await readNextReviewEvidencePacket(
     sandbox,
@@ -54,6 +56,7 @@ export async function readLaneReviewEvidencePacket(
   return {
     ledgerDigest: ledger.digest,
     commonWork: ledger.commonWork,
+    requirements,
     github: ledger.github,
     probes: ledger.probes,
     gaps: ledger.gaps,

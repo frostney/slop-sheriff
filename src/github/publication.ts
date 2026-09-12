@@ -12,6 +12,7 @@ import {
 } from "./review-state";
 import type { TrustedGitHubContext } from "./trusted-context";
 import {
+  findingIsOutstanding,
   reviewReportSchema,
   type ReviewFinding,
   type ReviewReport,
@@ -23,8 +24,9 @@ import {
   reviewFindingCountSummary,
   nativeReviewBody,
 } from "./review-presentation";
-import { reviewAxes, type ReviewAxis } from "../review/axes";
-import { findingIdentity } from "../review/finding-identity";
+import { laneCheckName, reviewLaneRegistry } from "../review/project-lanes";
+import type { ReviewAxis } from "../review/axes";
+import { findingIdentity, preserveFindingDismissals } from "../review/finding-identity";
 import type { ReviewFailureEnvelope } from "../review/recovery";
 import {
   reportAssemblyIdentitySchema,
@@ -36,7 +38,7 @@ export { findingBody } from "./review-presentation";
 
 function validateFindingPresentation(report: ReviewReport): void {
   for (const [index, finding] of report.findings.entries()) {
-    if (finding.status === "fixed") continue;
+    if (!findingIsOutstanding(finding)) continue;
     let body: string;
     try {
       // The formatter enforces the complete visible word budget before storage.
@@ -59,8 +61,8 @@ function validateFindingPresentation(report: ReviewReport): void {
 export const checkName = "slop-sheriff";
 export const legacyCheckName = "known-good-review";
 export const reviewCheckNames = [checkName, legacyCheckName] as const;
-export function axisCheckName(axis: ReviewAxis): string {
-  return `${checkName} / ${axis}`;
+export function axisCheckName(axis: ReviewAxis, config?: Pick<ReviewConfig, "lanes">): string {
+  return laneCheckName(axis, config);
 }
 
 export type ActiveReviewIdentity =
@@ -165,24 +167,23 @@ type OctokitClient = Octokit;
 function resolutionReplyBody(
   id: string,
   context: TrustedGitHubContext,
-  reason: "fixed" | "moved",
+  reason: "fixed" | "moved" | "dismissed",
   evidence?: string,
-  personality = true,
 ): string {
   const commit = `[${context.headSha.slice(0, 7)}](https://github.com/${context.repository}/commit/${context.headSha})`;
   const prefix = reason === "fixed"
     ? `✅ Verified fixed in ${commit}.`
+    : reason === "dismissed" ? `☑️ Dismissed in ${commit}.`
     : `↪️ This finding moved to a new inline location in ${commit}.`;
   // Keep the human reply short while linking the exact reviewed commit.
   const detail = evidence ? renderPlainText(evidence.replaceAll(/\s+/g, " ").trim()) : undefined;
-  const opener = personality ? (reason === "fixed" ? "Trail’s clear now, partner. " : "New hitching post, same snag. ") : "";
-  const available = Math.max(0, 299 - opener.length - prefix.length);
+  const available = Math.max(0, 299 - prefix.length);
   const summary = detail && available > 1
     ? ` ${detail.length <= available ? detail : `${detail.slice(0, available - 1).trimEnd()}…`}`
     : "";
   return [
     `<!-- known-good-review:resolution:${id}:${context.headSha}:${reason} -->`,
-    `${opener}${prefix}${summary}`,
+    `${prefix}${summary}`,
   ].join("\n");
 }
 
@@ -231,7 +232,7 @@ function timelineMarkerId(body: string | null | undefined): string | null {
 function hasBlockingFinding(report: ReviewReport): boolean {
   return report.findings.some(
     (finding) =>
-      finding.status !== "fixed" &&
+      findingIsOutstanding(finding) &&
       (finding.severity === "BLOCKING" || finding.severity === "IMPORTANT"),
   );
 }
@@ -241,18 +242,18 @@ function conclusionFor(
   config: Pick<ReviewConfig, "blocking">,
 ): "failure" | "neutral" | "success" {
   if (config.blocking && hasBlockingFinding(report)) return "failure";
-  if (report.findings.some((finding) => finding.status !== "fixed")) return "neutral";
+  if (report.findings.some((finding) => findingIsOutstanding(finding))) return "neutral";
   return "success";
 }
 
 function checkSummary(
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality" | "voice" | "lanes">>,
 ): string {
   const published = publishedFindings(report, config.profile);
-  const active = report.findings.filter((finding) => finding.status !== "fixed");
+  const active = report.findings.filter((finding) => findingIsOutstanding(finding));
   return [
-    `Policy result: **${config.blocking && hasBlockingFinding(report) ? "CHANGES REQUESTED" : "REVIEW COMPLETE"}**`,
+    `Policy result: **${hasBlockingFinding(report) ? "CHANGES NEEDED" : "CLEAR"}**`,
     "",
     reviewFindingCountSummary(report, config.profile),
     `Published inline: **${published.length} of ${active.length} active findings**`,
@@ -288,7 +289,7 @@ async function upsertCheck(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality" | "voice" | "lanes">>,
   forcedConclusion?: "action_required",
 ) {
   const existing = await latestCheck(octokit, context);
@@ -302,8 +303,8 @@ async function upsertCheck(
     output: {
       title: forcedConclusion === "action_required"
         ? "Slop Sheriff: review incomplete"
-        : config.blocking && hasBlockingFinding(report)
-        ? "Slop Sheriff: changes requested"
+        : hasBlockingFinding(report)
+        ? "Slop Sheriff: changes needed"
         : "Slop Sheriff: review complete",
       summary: (forcedConclusion === "action_required"
         ? [
@@ -334,6 +335,7 @@ async function upsertCheck(
 }
 
 export async function publishInProgressCheck(input: {
+  readonly config?: Pick<ReviewConfig, "lanes">;
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
   readonly review: ActiveReviewIdentity;
@@ -369,6 +371,7 @@ export async function publishInProgressCheck(input: {
   await Promise.all([
     ...(input.activeAxes ?? []).map((axis) =>
       upsertAxisCheck({
+        config: input.config,
         axis,
         conclusion: null,
         context: input.context,
@@ -378,6 +381,7 @@ export async function publishInProgressCheck(input: {
     ),
     ...(input.skippedAxes ?? []).map((axis) =>
       upsertAxisCheck({
+        config: input.config,
         axis,
         conclusion: "skipped",
         context: input.context,
@@ -393,13 +397,14 @@ export async function publishInProgressCheck(input: {
 }
 
 async function upsertAxisCheck(input: {
+  readonly config?: Pick<ReviewConfig, "lanes"> | undefined;
   readonly axis: ReviewAxis;
   readonly conclusion: "action_required" | "skipped" | "success" | null;
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
   readonly summary: string;
 }): Promise<void> {
-  const name = axisCheckName(input.axis);
+  const name = axisCheckName(input.axis, input.config);
   const existing = await latestCheck(input.octokit, input.context, name);
   const completed = input.conclusion !== null;
   if (existing?.status === "completed" && completed) {
@@ -436,12 +441,14 @@ async function upsertAxisCheck(input: {
 }
 
 export async function publishAxisCheckpoint(input: {
+  readonly config?: Pick<ReviewConfig, "lanes">;
   readonly axis: ReviewAxis;
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
   readonly status: "complete" | "in-progress";
 }): Promise<void> {
   await upsertAxisCheck({
+    config: input.config,
     axis: input.axis,
     conclusion: input.status === "complete" ? "success" : null,
     context: input.context,
@@ -457,11 +464,13 @@ async function completeAxisChecks(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   report: ReviewReport,
+  config: Pick<ReviewConfig, "lanes">,
 ): Promise<void> {
   const active = new Set(report.coverage.activeAxes);
   await Promise.all(
-    reviewAxes.map((axis) =>
+    reviewLaneRegistry(config).map(({id: axis}) =>
       upsertAxisCheck({
+        config,
         axis,
         conclusion: active.has(axis) ? "success" : "skipped",
         context,
@@ -597,7 +606,7 @@ async function createReviewThreads(
   context: TrustedGitHubContext,
   threads: readonly NewReviewThread[],
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality" | "voice" | "lanes">>,
 ): Promise<void> {
   if (threads.length === 0 && !config.blocking) return;
   await verifyPublicationHead(octokit, context);
@@ -741,11 +750,10 @@ async function replyAndResolveFinding(
   comments: readonly { readonly body?: string | null; readonly id: number; readonly in_reply_to_id?: number | null }[],
   roots: readonly { readonly body?: string | null; readonly id: number }[],
   finding: ReviewFinding,
-  reason: "fixed" | "moved",
+  reason: "fixed" | "moved" | "dismissed",
   threads: readonly ReviewThreadIdentity[],
-  personality: boolean,
 ): Promise<void> {
-  const body = resolutionReplyBody(finding.id, context, reason, reason === "fixed" ? finding.evidence[0] : undefined, personality);
+  const body = resolutionReplyBody(finding.id, context, reason, reason === "fixed" ? finding.resolutionSummary ?? finding.evidence[0] : reason === "dismissed" ? `Accepted by @${finding.dismissal!.actor}: ${finding.dismissal!.reason}` : undefined);
   const failures: unknown[] = [];
   for (const root of roots) {
     const thread = threads.find((candidate) => candidate.commentIds.includes(root.id));
@@ -829,7 +837,7 @@ async function reconcileFindingComments(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality" | "voice" | "lanes">>,
   files: readonly PullRequestFileForComment[],
   identities: Readonly<Record<string, string>>,
   priorReport: ReviewReport | null,
@@ -859,7 +867,7 @@ async function reconcileFindingComments(
   const resolutions: Array<{
     readonly finding: ReviewFinding;
     readonly roots: typeof comments;
-    readonly reason: "fixed" | "moved";
+    readonly reason: "fixed" | "moved" | "dismissed";
   }> = [];
 
   for (const finding of findings) {
@@ -886,7 +894,8 @@ async function reconcileFindingComments(
   for (const finding of report.findings) {
     const roots = rootsByIdentity.get(identities[finding.id] ?? findingIdentity(finding));
     // Unmatched and profile-hidden findings remain open. Absence is not a fix.
-    if (finding.status === "fixed" && roots) resolutions.push({ finding, roots, reason: "fixed" });
+    if (finding.dismissal && roots) resolutions.push({ finding, roots, reason: "dismissed" });
+    else if (finding.status === "fixed" && roots) resolutions.push({ finding, roots, reason: "fixed" });
   }
 
   return async () => {
@@ -902,7 +911,7 @@ async function reconcileFindingComments(
     const threads = resolutions.length > 0 ? await reviewThreadIdentities(octokit, context) : [];
     for (const resolution of resolutions) {
       try {
-        await replyAndResolveFinding(octokit, context, comments, resolution.roots, resolution.finding, resolution.reason, threads, config.personality !== false);
+        await replyAndResolveFinding(octokit, context, comments, resolution.roots, resolution.finding, resolution.reason, threads);
       } catch (error) { failures.push(error); }
     }
     if (failures.length > 0) throw threadDeliveryFailure(failures);
@@ -914,25 +923,15 @@ async function failRunningAxisChecks(
   context: Omit<TrustedGitHubContext, "patchFingerprint">,
   message: string,
 ): Promise<void> {
-  await Promise.all(
-    reviewAxes.map(async (axis) => {
-      const existing = await latestCheck(octokit, context, axisCheckName(axis));
-      if (!existing || existing.status === "completed") return;
-      await octokit.rest.checks.update({
-        owner: context.owner,
-        repo: context.repo,
-        check_run_id: existing.id,
-        name: axisCheckName(axis),
-        status: "completed",
-        conclusion: "action_required",
-        completed_at: new Date().toISOString(),
-        output: {
-          title: `${axis}: incomplete`,
-          summary: message,
-        },
-      });
-    }),
-  );
+  const listed = await octokit.rest.checks.listForRef({ owner: context.owner, repo: context.repo, ref: context.headSha, per_page: 100 });
+  await Promise.all(listed.data.check_runs.filter((check) =>
+    check.status !== "completed" && reviewCheckNames.some((prefix) => check.name.startsWith(`${prefix} /`)),
+  ).map(async (existing) => {
+    await octokit.rest.checks.update({ owner: context.owner, repo: context.repo,
+      check_run_id: existing.id, name: existing.name, status: "completed", conclusion: "action_required",
+      completed_at: new Date().toISOString(), output: { title: `${existing.name}: incomplete`, summary: message },
+    });
+  }));
 }
 
 async function retireTimelineFindingComments(
@@ -1111,6 +1110,8 @@ export async function stageReviewPublication(input: {
       initialFullStatus: "running" as const,
       baseline: null,
     }),
+    initialFullStatus: "running",
+    currentHead: input.context.headSha,
     pendingPublication: {
       identity,
       report,
@@ -1200,13 +1201,16 @@ async function verifyPublicationHead(
 }
 
 export async function publishReview(input: {
-  readonly config?: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>;
+  readonly config?: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality" | "voice" | "lanes">>;
   readonly context: TrustedGitHubContext;
   readonly octokit: OctokitClient;
   readonly reconcileFindings?: boolean;
   readonly report: ReviewReport;
 }): Promise<{ readonly checkUrl: string; readonly findingCount: number }> {
   validateFindingPresentation(input.report);
+  if (input.report.coverage.unreached.length > 0) {
+    throw new ReviewReportValidationError([{ code: "custom", path: ["coverage", "unreached"] }], "Required review coverage is incomplete; publication cannot certify this revision");
+  }
   if (
     input.report.scope.head !== input.context.headSha ||
     input.report.scope.base !== input.context.baseSha
@@ -1218,6 +1222,7 @@ export async function publishReview(input: {
   if (!input.context.patchFingerprint) {
     throw new Error("Trusted review context is missing patch identity");
   }
+  const patchFingerprint = input.context.patchFingerprint;
   await verifyPublicationHead(input.octokit, input.context);
   const config = input.config ?? { blocking: false, profile: "balanced" as const };
   const changed = await input.octokit.paginate(
@@ -1241,6 +1246,7 @@ export async function publishReview(input: {
   // it still describes this review before publishing any visible result.
   await verifyPublicationHead(input.octokit, input.context);
   const currentState = await readLatestReviewState(input.octokit, input.context);
+  input = { ...input, report: preserveFindingDismissals(input.report, currentState?.baseline?.report ?? null) };
   const threadIdentity = findingPublicationMetadata(input.report, currentState, input.context);
   let cleanupFindingComments: (() => Promise<void>) | null = null;
   if (input.reconcileFindings ?? true) {
@@ -1272,7 +1278,7 @@ export async function publishReview(input: {
   if (config.blocking && !hasBlockingFinding(input.report)) {
     await createReviewThreads(input.octokit, input.context, [], input.report, config);
   }
-  await completeAxisChecks(input.octokit, input.context, input.report);
+  await completeAxisChecks(input.octokit, input.context, input.report, config);
   const check = await upsertCheck(
     input.octokit,
     input.context,
@@ -1288,11 +1294,13 @@ export async function publishReview(input: {
     app: legacyCheckName,
     pullRequest: input.context.pullRequest,
     initialFullStatus: "completed",
+    currentHead: input.context.headSha,
     publication: config,
     baseline: {
       head: input.context.headSha,
-      patchFingerprint: input.context.patchFingerprint,
+      patchFingerprint,
       findingsArtifactUrl: checkUrl,
+      reviewPolicyDigest: input.context.reviewPolicyDigest,
       files: effectivePatchFileFingerprints(patchFiles),
       report: input.report,
       findingThreadIdentities: threadIdentity.identities,

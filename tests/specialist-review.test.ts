@@ -104,6 +104,8 @@ describe("specialist evidence obligations", () => {
     content.completedReport.specialistChecks = [{ ...check, entries: [0, 1, 2] }];
     expect(() => validateLaneCheckpointCoverage(content, 2)).toThrow("without expanding scope");
     content.completedReport.specialistChecks = [{ ...check, entries: [0, 1] }];
+    expect(() => validateLaneCheckpointCoverage(content, 2)).toThrow("Required verification remains unverified");
+    content.completedReport.specialistChecks = [{ ...check, entries: [0, 1], status: "passed", observed: "CLI exits nonzero with diagnostic" }];
     expect(() => validateLaneCheckpointCoverage(content, 2)).not.toThrow();
     content.completedReport.specialistChecks = null;
     expect(() => validateLaneCheckpointCoverage(content, 2)).toThrow("explicit coverage checks");
@@ -116,16 +118,19 @@ describe("specialist evidence obligations", () => {
   });
 
   test("all specialist outcomes reach canonical report assembly without coordinator restatement", () => {
-    const draft: ReviewReportDraft = { scope: { claim: "CLI validation", dirtyState: "clean" }, coverage: { staticOnly: [], unreached: [] }, churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] }, probes: [], freshFindings: [], verifiedClaims: [], limitations: [] };
+    const draft: ReviewReportDraft = { actionSummary: "CLI evidence retained", additionalConcerns: [], scope: { claim: "CLI validation", dirtyState: "clean" }, coverage: { staticOnly: [], unreached: [] }, churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] }, probes: [], freshFindings: [], verifiedClaims: [], limitations: [] };
     const completed = checkpointContent("test-against-spec").completedReport;
     if (!completed) throw new Error("Expected complete fixture");
     const report: LaneCompletedReport = { ...completed, specialistChecks: ["passed", "failed", "unverified", "out-of-scope"].map((status) => ({ ...check, status: status as "passed" | "failed" | "unverified" | "out-of-scope" })) };
     const retained = retainSpecialistEvidence(draft, [report]);
-    const assembled = assembleCanonicalReviewReport({ draft: retained, generatedAt: "2026-09-10T00:00:00.000Z", priorReport: null, state: beginReportAssembly({ executionRevision: "review-report-v2", repositoryId: "R_fixture", pullRequest: 1, ...identity, planKind: "full", baselineHead: null, reviewPaths: ["src/main.ts"], activeAxes: ["test-against-spec"], selectedFindingIds: [] }) });
-    expect(assembled.report?.probes).toHaveLength(4);
-    expect(assembled.report?.limitations).toHaveLength(3);
-    expect(assembled.report?.coverage.unreached[0]).toContain("unverified");
-    expect(assembled.report?.verifiedClaims).toEqual([]);
+    const assemble = (input: ReviewReportDraft) => assembleCanonicalReviewReport({ draft: input, generatedAt: "2026-09-10T00:00:00.000Z", priorReport: null, state: beginReportAssembly({ executionRevision: "review-report-v2", repositoryId: "R_fixture", pullRequest: 1, ...identity, planKind: "full", baselineHead: null, reviewPaths: ["src/main.ts"], activeAxes: ["test-against-spec"], selectedFindingIds: [] }) });
+    expect(() => assemble(retained)).toThrow("verification");
+    expect(retained.probes).toHaveLength(4);
+    expect(retained.limitations).toHaveLength(3);
+    expect(retained.coverage.unreached[0]).toContain("unverified");
+    const verified = retainSpecialistEvidence(draft, [{ ...report, specialistChecks: [{ ...check, status: "passed", observed: "Exact-head CLI rejected the invalid input" }] }]);
+    expect(assemble(verified).report?.probes).toHaveLength(1);
+    expect(assemble(verified).report?.verifiedClaims).toEqual([]);
     expect(retainSpecialistEvidence(retained, [report])).toEqual(retained);
   });
 });
@@ -150,4 +155,21 @@ test("role-specific policies retain review authority without handing lanes coord
   expect(health).toContain("tolerate behavior-preserving refactors");
   expect(health).toContain("Never derive expected values from the implementation");
   expect(health).toContain("Do not infer when or by whom tests were written");
+});
+
+test("required source evidence cannot disappear during canonical assembly", async () => {
+  const sourceId = `req-${"a".repeat(24)}`;
+  const report = checkpointContent("claim-and-specification").completedReport!;
+  report.requirementChecks = [{ sourceId, obligationId: null, requirement: "Invalid CLI input must fail", basis: "established", establishedRequirement: "docs/DoD.md at base requires exit 1", proposedChange: "Head documentation now claims exit 0 is successful", approvalEvidence: null, expected: "Exit 1 with diagnostic", observed: "Exact head CLI exits 0", action: "cli --invalid", environment: "Local exact head", status: "failed" }];
+  const draft: ReviewReportDraft = { actionSummary: "Correct invalid-input behavior and its documentation", additionalConcerns: [], scope: { claim: "CLI validation", dirtyState: "clean" }, coverage: { staticOnly: [], unreached: [] }, churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] }, probes: [], freshFindings: [], verifiedClaims: [], limitations: [] };
+  expect(() => retainSpecialistEvidence(draft, [report])).toThrow("must remain a material claim finding");
+  draft.freshFindings.push({ severity: "IMPORTANT", category: "CLAIM", title: "Restore invalid-input rejection", introduction: "The CLI accepts invalid input despite the established completion requirement, allowing callers to treat malformed requests as successful operations.", principle: "Preserve the documented public CLI exit contract", risk: "Callers that trust exit status may continue after validation fails.", location: { path: "src/cli.ts", line: 1, symbol: null }, evidence: ["docs/DoD.md at base requires exit 1; head CLI exits 0", "Head docs remove rejection without maintainer approval"], impact: "Invalid requests pass validation", impactSummary: "Invalid requests pass validation", remedy: "Restore rejection or obtain explicit approval for the product change", staticOnly: false, churn: null, requirementIds: [sourceId] });
+  const retained = retainSpecialistEvidence(draft, [report]);
+  expect(retained.probes[0]?.result).toContain("Established: docs/DoD.md at base requires exit 1");
+  expect(retained.probes[0]?.result).toContain("Proposed: Head documentation now claims exit 0");
+  const assembled = assembleCanonicalReviewReport({ draft: retained, generatedAt: "2026-09-12T00:00:00.000Z", priorReport: null, state: beginReportAssembly({ executionRevision: "review-report-v2", repositoryId: "R_fixture", pullRequest: 1, ...identity, planKind: "full", baselineHead: null, reviewPaths: ["src/cli.ts"], activeAxes: ["claim-and-specification"], selectedFindingIds: [] }) });
+  expect(assembled.report?.findings[0]).toMatchObject({ severity: "IMPORTANT", category: "CLAIM", requirementIds: [sourceId] });
+  const schema = await asSchema(reviewLaneCheckpointInputSchema).jsonSchema;
+  expect(schema).toHaveProperty("properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.requirementChecks.anyOf.0.items.additionalProperties", false);
+  expect(schema).toHaveProperty("properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.requirementChecks.anyOf.0.items.required", expect.arrayContaining(["sourceId", "obligationId", "basis", "establishedRequirement", "proposedChange", "approvalEvidence", "expected", "observed", "action", "environment", "status"]));
 });

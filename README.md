@@ -113,11 +113,13 @@ agents:
   scout: openai/gpt-5.6-luna
 ```
 
-Set `personality: false` for plain review language. The default cowboy voice
-changes presentation only; it never changes evidence, severity, coverage, or
-blocking policy. Each inline finding uses at most 100 words: a short cowboy
-opener, title/severity, concrete evidence and a final Impact line of at most
-300 characters. Full analysis stays in the canonical report. See the [voice and visual guide](docs/brand.md).
+Choose `voice: theatrical` (C, default), `voice: understated` (B), or
+`voice: off`. `personality: false` also selects plain language. A trusted-base
+`voiceGuide: docs/review-voice.md` can customize style without changing evidence,
+severity, or the recommendation. Each finding has a 25 to 45 word introduction,
+expandable evidence, applicable principle and fix direction, then visible Impact
+(at most 300 characters) and one-sentence Risk. The whole comment stays within
+200 words. See the [voice and visual guide](docs/brand.md).
 The [validation record](docs/validation/slop-sheriff.md) includes comment
 previews, policy measurements and the remaining real-model comparison work.
 
@@ -130,7 +132,7 @@ consumer contracts: public outcomes, failure sensitivity and tolerance of
 internal refactors. Discoverability is conditional on public web content; writing
 quality activates for changed authored prose, strings or substantive comments. Specialist reports classify their scope and preserve failed and
 unverified results. Supported defects from every lane are posted inline;
-out-of-scope commentary is collapsed in the main summary. Before dispatch,
+only actionable unrelated existing concerns appear in the main summary details. Before dispatch,
 shared setup installs declared toolchains, locked dependencies and needed browser
 components. Setup failure prevents review completion. Real external requirements
 remain explicit limitations. Fixed bot threads receive a brief acknowledgement
@@ -295,5 +297,6 @@ state markers remain compatible. Renaming the GitHub App registration is a
 separate operational change; keep `GITHUB_BOT_USER_ID` pinned to that App
 when changing its login. See [brand migration](docs/brand.md#operational-migration).
 
-See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
+See [project lane authoring](docs/custom-lanes.md), [requirements and documentation checks](docs/requirements.md),
+[comment examples in all three voice modes](docs/review-examples.md), [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

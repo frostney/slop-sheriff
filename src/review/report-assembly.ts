@@ -1,10 +1,13 @@
 import { z } from "zod";
-import { reviewAxes } from "./axes";
-import { findingIdentity } from "./finding-identity";
+import { reviewAxes, reviewAxisSchema, maxReviewLanes } from "./axes";
+import { findingIdentity, preserveFindingDismissals } from "./finding-identity";
 import { repositoryPathSchema } from "./evidence-bundle";
 import {
+  additionalConcernSchema,
+  findingIsOutstanding,
   reviewFindingDraftSchema,
   reviewFindingSchema,
+  reviewFindingRevalidationSchema,
   reviewReportSchema,
   type ReviewFindingDraft,
   type ReviewFinding,
@@ -22,9 +25,9 @@ export const schemaDiagnosticSchema = z.object({
 export type SchemaDiagnostic = z.infer<typeof schemaDiagnosticSchema>;
 
 export const reviewAxisDecisionsSchema = z.array(z.object({
-  axis: z.enum(reviewAxes), selected: z.boolean(), reason: z.string().min(1),
+  axis: reviewAxisSchema, selected: z.boolean(), reason: z.string().min(1),
   paths: z.array(repositoryPathSchema).max(2_000),
-})).length(reviewAxes.length);
+})).min(reviewAxes.length).max(maxReviewLanes);
 
 export const reportAssemblyIdentitySchema = z.object({
   executionRevision: z.literal("review-report-v2"),
@@ -33,19 +36,24 @@ export const reportAssemblyIdentitySchema = z.object({
   baseSha: revisionSchema,
   headSha: revisionSchema,
   patchFingerprint: fingerprintSchema,
+  laneRegistryDigest: fingerprintSchema.optional(),
+  reviewPolicyDigest: fingerprintSchema.optional(),
   planKind: z.enum(["full", "delta"]),
   baselineHead: revisionSchema.nullable(),
   reviewPaths: z.array(repositoryPathSchema).max(2_000),
-  activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
+  activeAxes: z.array(reviewAxisSchema).min(1).max(maxReviewLanes),
   axisDecisions: reviewAxisDecisionsSchema.optional(),
   selectedFindingIds: z
     .array(z.string().regex(/^CR-[1-9]\d*$/))
     .max(100),
 }).superRefine((identity, context) => {
-  if (identity.axisDecisions && (new Set(identity.axisDecisions.map((item) => item.axis)).size !== reviewAxes.length ||
-    identity.axisDecisions.some((item) => item.selected !== identity.activeAxes.includes(item.axis)))) {
+  if (identity.axisDecisions && (new Set(identity.axisDecisions.map((item) => item.axis)).size !== identity.axisDecisions.length ||
+    reviewAxes.some((axis) => !identity.axisDecisions?.some((item) => item.axis === axis)) ||
+    identity.axisDecisions.some((item) => item.selected !== identity.activeAxes.includes(item.axis)) ||
+    identity.activeAxes.some((axis) => !identity.axisDecisions?.some((item) => item.axis === axis)))) {
     context.addIssue({ code: "custom", path: ["axisDecisions"], message: "Triage decisions must cover each axis and agree with dispatch" });
   }
+  if (identity.activeAxes.some((axis) => axis.startsWith("project-")) && !identity.laneRegistryDigest) context.addIssue({ code: "custom", path: ["laneRegistryDigest"], message: "Project lanes require their trusted registry identity" });
   if ((identity.planKind === "delta") !== (identity.baselineHead !== null)) {
     context.addIssue({ code: "custom", path: ["baselineHead"], message: "Only delta reviews require an exact baseline head" });
   }
@@ -81,6 +89,8 @@ export type ReportAssemblyIdentity = z.infer<
 
 export const reviewReportDraftSchema = z
   .strictObject({
+    actionSummary: z.string().min(1).max(800),
+    additionalConcerns: z.array(additionalConcernSchema).max(20),
     scope: z.object({
       claim: z.string(),
       dirtyState: z.string(),
@@ -183,7 +193,7 @@ export function recordRevalidationResults(
   value: unknown,
 ): ReportAssemblyState {
   const current = reportAssemblyStateSchema.parse(state);
-  const parsed = z.array(reviewFindingSchema).max(100).safeParse(value);
+  const parsed = z.array(reviewFindingRevalidationSchema).max(100).safeParse(value);
   if (!parsed.success) {
     const diagnostics = diagnosticsFrom(parsed.error);
     throw new ReviewReportValidationError(diagnostics);
@@ -307,19 +317,19 @@ const skippedAxisReasons = {
 } satisfies Readonly<Record<(typeof reviewAxes)[number], string>>;
 
 function skippedReviewAxes(
-  activeAxes: readonly (typeof reviewAxes)[number][],
+  activeAxes: readonly import("./axes").ReviewAxis[],
   decisions: ReportAssemblyIdentity["axisDecisions"],
 ): readonly { readonly name: string; readonly reason: string }[] {
   const active = new Set(activeAxes);
-  return reviewAxes
+  return (decisions?.map((decision) => decision.axis) ?? reviewAxes)
     .filter((axis) => !active.has(axis))
-    .map((name) => ({ name, reason: decisions?.find((decision) => decision.axis === name)?.reason ?? skippedAxisReasons[name] }));
+    .map((name) => ({ name, reason: decisions?.find((decision) => decision.axis === name)?.reason ?? (name in skippedAxisReasons ? skippedAxisReasons[name as keyof typeof skippedAxisReasons] : "Project criteria did not apply to this change.") }));
 }
 
 function reportVerdict(
   findings: readonly ReviewFinding[],
 ): ReviewReport["verdict"] {
-  const active = findings.filter((finding) => finding.status !== "fixed");
+  const active = findings.filter(findingIsOutstanding);
   if (
     active.some(
       (finding) =>
@@ -372,7 +382,7 @@ function priorFindings(
   );
   validateRevalidationEvidence(state.revalidatedFindings, priorReport, priorRuntimeFindingIds);
   return priorReport.findings.map(
-    (finding) => revalidated.get(finding.id) ?? finding,
+    (finding) => finding.dismissal ? finding : revalidated.get(finding.id) ?? finding,
   );
 }
 
@@ -388,6 +398,9 @@ export function assembleCanonicalReviewReport(input: {
   const draft = reviewReportDraftSchema.safeParse(input.draft);
   if (!draft.success) {
     throw new ReviewReportValidationError(diagnosticsFrom(draft.error));
+  }
+  if (draft.data.coverage.unreached.length > 0) {
+    throw new ReviewReportValidationError([{ code: "custom", path: ["coverage", "unreached"] }], "Required verification must complete before report assembly");
   }
   if (state.identity.planKind === "delta") {
     const paths = new Set(state.identity.reviewPaths);
@@ -427,6 +440,8 @@ export function assembleCanonicalReviewReport(input: {
     kind: "code-review",
     generatedAt: input.generatedAt,
     verdict: reportVerdict(findings),
+    actionSummary: draft.data.actionSummary,
+    additionalConcerns: draft.data.additionalConcerns,
     scope: {
       claim: draft.data.scope.claim,
       base: state.identity.baseSha,
@@ -449,7 +464,7 @@ export function assembleCanonicalReviewReport(input: {
   }
   return reportAssemblyStateSchema.parse({
     ...state,
-    report: report.data,
+    report: preserveFindingDismissals(report.data, input.priorReport),
     diagnostics: [],
   });
 }

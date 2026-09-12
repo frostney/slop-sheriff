@@ -793,7 +793,7 @@ describe("GitHub publication lifecycle", () => {
       )?.body,
     ).toMatchObject({
       body: expect.stringContaining(
-        "## 💬 Slop Sheriff: review complete",
+        "## 🛑 Slop Sheriff: changes needed",
       ),
     });
     expect(

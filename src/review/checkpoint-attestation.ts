@@ -1,13 +1,14 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { evidenceSigningKey } from "./authenticated-evidence";
-import { reviewAxes } from "./axes";
+import { reviewAxisSchema } from "./axes";
 import type { LaneCheckpoint } from "./lane-checkpoint";
 
 const attestationSchema = z.strictObject({
   version: z.literal(1), rootSessionId: z.string().min(1), invocationId: z.string().min(1),
-  axis: z.enum(reviewAxes), attempt: z.number().int().nonnegative(), operation: z.enum(["read", "write"]),
+  axis: reviewAxisSchema, attempt: z.number().int().nonnegative(), operation: z.enum(["read", "write"]),
   baseSha: z.string(), headSha: z.string(), patchFingerprint: z.string(), evidenceDigest: z.string(),
+  laneRegistryDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   revision: z.number().int().positive(), status: z.enum(["complete", "in-progress"]),
   checkpointDigest: z.string().regex(/^[a-f0-9]{64}$/),
 });
@@ -23,6 +24,7 @@ export function attestCheckpoint(input: {
     version: 1, rootSessionId: input.rootSessionId, invocationId: input.invocationId,
     axis: checkpoint.axis, attempt: input.attempt, operation: input.operation,
     baseSha: checkpoint.baseSha, headSha: checkpoint.headSha, patchFingerprint: checkpoint.patchFingerprint,
+    laneRegistryDigest: checkpoint.laneRegistryDigest,
     evidenceDigest: checkpoint.evidenceDigest, revision: checkpoint.revision, status: checkpoint.status,
     checkpointDigest: createHash("sha256").update(JSON.stringify(checkpoint)).digest("hex"),
   });
@@ -32,7 +34,7 @@ export function attestCheckpoint(input: {
 }
 
 export function verifyCheckpointAttestation(token: string, expected: Pick<CheckpointAttestation,
-  "rootSessionId" | "invocationId" | "axis" | "attempt" | "baseSha" | "headSha" | "patchFingerprint"
+  "rootSessionId" | "invocationId" | "axis" | "attempt" | "baseSha" | "headSha" | "patchFingerprint" | "laneRegistryDigest"
 >, secret: string | undefined): CheckpointAttestation {
   const parts = token.split(".");
   const encoded = parts[0];
@@ -41,7 +43,7 @@ export function verifyCheckpointAttestation(token: string, expected: Pick<Checkp
   const actual = createHmac("sha256", evidenceSigningKey(secret)).update("review-checkpoint-attestation-v1\0").update(encoded).digest();
   if (!timingSafeEqual(Buffer.from(signature, "hex"), actual)) throw new Error("Checkpoint attestation authentication failed");
   const payload = attestationSchema.parse(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")));
-  for (const field of ["rootSessionId", "invocationId", "axis", "attempt", "baseSha", "headSha", "patchFingerprint"] as const) {
+  for (const field of ["rootSessionId", "invocationId", "axis", "attempt", "baseSha", "headSha", "patchFingerprint", "laneRegistryDigest"] as const) {
     if (payload[field] !== expected[field]) throw new Error(`Checkpoint attestation ${field} mismatch`);
   }
   return payload;

@@ -1,10 +1,13 @@
+import { requirementObligationIdentities, requirementsForAxis } from "../../src/review/requirements";
+import { readReviewEvidenceLedger } from "../../src/review/evidence-ledger";
+import { currentReviewEvidenceIdentity } from "../lib/review-evidence";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { requireReviewLane } from "../lib/review-route";
 import { defineTool, toolOutput } from "eve/tools";
 import type { SessionContext } from "eve/context";
 import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
-import { reviewAxes } from "../../src/review/axes";
+import { reviewAxisSchema } from "../../src/review/axes";
 import {
   laneCheckpointDraftContentSchema,
   readLaneCheckpoint,
@@ -18,6 +21,7 @@ import {
   readReviewEvidenceProgress,
 } from "../../src/review/evidence-bundle";
 import { githubAdapter } from "../../src/github/chat-adapter";
+import { reviewConfigFromAuth } from "../../src/config/trusted-review-config";
 import { publishAxisCheckpoint } from "../../src/github/publication";
 import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 import { attestCheckpoint } from "../../src/review/checkpoint-attestation";
@@ -46,7 +50,7 @@ export const reviewLaneCheckpointInputSchema = z
     operation: z
       .enum(["read", "write"])
       .describe("Read the current checkpoint or replace it."),
-    axis: z.enum(reviewAxes),
+    axis: reviewAxisSchema,
     checkpoint: laneCheckpointDraftContentSchema
       .nullable()
       .describe(
@@ -88,6 +92,9 @@ export default defineTool({
       sandbox,
     );
     const manifest = await readReviewEvidenceManifest(sandbox, identity);
+    const ledger = await readReviewEvidenceLedger(sandbox, currentReviewEvidenceIdentity(ctx.session.auth.current));
+    const requirements = requirementsForAxis(ledger.requirements ?? [], input.axis);
+    const requirementIds = requirements.map((source) => source.id);
     if (input.operation === "read") {
       const checkpoint = await readLaneCheckpoint(
         sandbox,
@@ -95,7 +102,7 @@ export default defineTool({
         input.axis,
       );
       if (checkpoint) {
-        validateLaneCheckpointCoverage(checkpoint, manifest.entries.length);
+        validateLaneCheckpointCoverage(checkpoint, manifest.entries.length, requirementIds, requirementObligationIdentities(requirements));
       }
       return {
         operation: "read" as const,
@@ -118,8 +125,11 @@ export default defineTool({
       input.axis,
       input.checkpoint,
       manifest.entries.length,
+      requirementIds,
+      requirementObligationIdentities(requirements),
     );
     await publishAxisCheckpoint({
+      config: reviewConfigFromAuth(ctx.session.auth.current),
       axis: input.axis,
       context: trusted,
       octokit: githubAdapter(trusted.installationId).octokit,

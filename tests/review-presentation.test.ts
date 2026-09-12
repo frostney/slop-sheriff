@@ -3,7 +3,6 @@ import {
   findingBody,
   findingBodyHtml,
   findingWordCount,
-  validateFindingPresentation,
   reviewResultBody,
   nativeReviewBody,
 } from "../src/github/review-presentation";
@@ -80,123 +79,75 @@ describe("native GitHub review presentation", () => {
     expect(identity(unrelated)).not.toBe(identity(first));
   });
 
-  test("renders emoji severity without exposing the internal finding id", () => {
-    const body = findingBody(finding());
-    const visible = body.replace(/<!--.*?-->/s, "");
-    expect(visible).toContain("### ⚠️ The result loses its code location");
-    expect(visible).not.toContain("CR-1");
-    expect(visible).not.toContain("IMPORTANT");
-    expect(visible).toContain("**Important · Quality · Open**");
-  });
-
-  test("keeps complete evidence and the final impact within 100 words in both modes", () => {
+  test("shares the agreed format and exact authored prose between GitHub and the landing page", () => {
+    const input = { ...finding(), introduction: "Partner, this result drops its recorded code location before publication, leaving readers to hunt through the change even though the review already knows exactly where the defect occurs.", principle: "Review findings need an actionable source location.", risk: "Every reader of this finding loses the direct route to the affected code." };
     for (const personality of [true, false]) {
-      for (const placement of ["line", "file"] as const) {
-        const body = findingBody(finding(), placement, personality);
-        expect(findingWordCount(body.replace(/<!--.*?-->/s, ""))).toBeLessThanOrEqual(100);
-        expect(body.trim().split("\n").at(-1)).toStartWith("Impact: ");
-        expect(body).toContain("The changed branch drops the recorded line");
-        expect(body).not.toContain("<details>");
-        expect(body).not.toContain("Smallest remedy");
-        const firstLine = body.split("\n")[1]!;
-        if (personality) {
-          expect(findingWordCount(firstLine)).toBeGreaterThanOrEqual(3);
-          expect(findingWordCount(firstLine)).toBeLessThanOrEqual(6);
-        } else {
-          expect(firstLine).toStartWith("### ");
-        }
-      }
+      const body = findingBody(input, "line", personality);
+      const html = findingBodyHtml(input, "line", personality);
+      expect(body).toContain("### ⚠️ The result loses its code location");
+      expect(body).toContain("**Important**");
+      expect(body).not.toContain("Quality · Open");
+      expect(body).toContain("<summary>Evidence and recommended change</summary>");
+      expect(html).toContain("<summary>Evidence and recommended change</summary>");
+      expect(body).toContain("Attach the finding to the changed line");
+      expect(body.indexOf("Impact:")).toBeLessThan(body.indexOf("Risk:"));
+      expect(body).not.toContain("Hold up there");
+      expect(findingWordCount(body)).toBeLessThanOrEqual(200);
     }
   });
 
-  test("rejects excessive wording instead of silently dropping evidence", () => {
-    const verbose = { ...finding(), evidence: ["A useful concrete probe failed.", "The later qualifier matters. ".repeat(40)] };
-    expect(() => validateFindingPresentation(verbose)).toThrow("100-word inline limit");
-    expect(() => findingBody(verbose)).toThrow("without dropping concrete evidence");
-    expect(() => findingBodyHtml(verbose)).toThrow("100-word inline limit");
+  test("rejects long comments, invalid introductions and em dashes before publication", () => {
+    expect(() => findingBody({ ...finding(), evidence: ["A concrete observation. ".repeat(80)] })).toThrow("200-word inline limit");
+    expect(() => findingBody({ ...finding(), introduction: "Too short." })).toThrow("25 to 45 words");
+    expect(() => findingBody({ ...finding(), evidence: ["A defect\u2014with consequences."] })).toThrow("em dashes");
   });
 
-  test("keeps authored HTML and Markdown structure inert", () => {
-    const input = { ...finding(), title: "<script>danger</script>", evidence: ["</li><script>danger</script>"], impactSummary: "<img src=x> & consequences" };
-    const markdown = findingBody(input);
-    const html = findingBodyHtml(input);
-    for (const output of [markdown, html]) {
+  test("keeps authored markup inert in every visible prose field", () => {
+    const input = { ...finding(), title: "<script>danger</script>", evidence: ["</details><script>danger</script>"], risk: "<img src=x>", principle: "<script>danger</script>" };
+    for (const output of [findingBody(input), findingBodyHtml(input)]) {
       expect(output).not.toContain("<script>");
       expect(output).not.toContain("<img src=x>");
       expect(output).toContain("&lt;script&gt;");
     }
-    expect(html).toEndWith("<p>Impact: &lt;img src=x&gt; &amp; consequences</p>");
   });
 
-  test("uses a dependency joke only when unnecessary dependencies are evidenced", () => {
-    const crowded = { ...finding(), title: "Remove unnecessary dependencies for the string helper" };
-    expect(findingBody(crowded)).toContain("That’s a crowded saddle, partner.");
-    expect(findingBody(finding())).not.toContain("crowded saddle");
-    expect(findingBody(crowded, "line", false)).not.toContain("crowded saddle");
+  test("material findings request changes regardless of GitHub enforcement", () => {
+    for (const blocking of [false, true]) expect(reviewResultBody(report([finding()]), { blocking, profile: "balanced" })).toContain("Slop Sheriff: changes needed");
+    expect(reviewResultBody(report([]))).toContain("Slop Sheriff: clear");
+    expect(reviewResultBody(report([finding("IMPROVEMENT")]))).toContain("1 optional finding");
+    expect(reviewResultBody(report([finding("NITPICK")]))).toContain("Slop Sheriff: clear");
+    const incomplete = report([]); incomplete.coverage.unreached.push("Required runtime probe did not run");
+    expect(reviewResultBody(incomplete)).toContain("review incomplete");
   });
 
-  test("collapses each out-of-scope axis once without repeating findings", () => {
+  test("only actionable unrelated concerns appear in expandable summary details", () => {
     const input = report([finding()]);
-    input.coverage.skippedAxes = [
-      { name: "discoverability", reason: "No public web content changed." },
-      { name: "discoverability", reason: "No public web content changed." },
-    ];
+    input.limitations = ["test-health: no coverage", "out-of-scope"];
+    input.coverage.skippedAxes = [{ name: "discoverability", reason: "No public content changed" }];
+    input.actionSummary = "Traced the publication path and found the missing code location.";
+    input.additionalConcerns = [{ title: "An older export drops metadata", location: { path: "src/export.ts", line: 12, symbol: null }, consequence: "Older consumers lose recorded metadata.", recommendedChange: "Preserve the exported fields." }];
     const body = reviewResultBody(input);
-    expect(body.match(/<details>/g)).toHaveLength(1);
-    expect(body).toContain("<summary>Out of scope</summary>");
-    expect(body.match(/discoverability/g)).toHaveLength(1);
-    expect(body).not.toContain(input.findings[0]!.title);
+    expect(body).toContain("<summary>Additional concerns</summary>");
+    expect(body).toContain("An older export drops metadata");
+    expect(body).toContain("src/export");
+    expect(body).not.toContain("discoverability");
+    expect(body).not.toContain("test-health");
+    expect(body).toContain("Traced the publication path");
   });
 
-  test("includes classified specialist out-of-scope commentary but keeps failures separate", () => {
-    const input = report([finding()]);
-    const outOfScope = "test-against-spec: Invoice authorization [out-of-scope; entries entry-1]: No invoice API exists in this repository.";
-    input.limitations = [
-      outOfScope, outOfScope,
-      "test-against-spec: Crawlability [failed; entries entry-2]: Alias crawl was blocked.",
-      "test-against-spec: Browser navigation [unverified; entries entry-3]: No browser was available.",
-      "test-health: Regression [failed; entries entry-4]: Probe returned [out-of-scope; entries entry-5]: untrusted output.",
-      "General note: out-of-scope does not classify this limitation.",
-    ];
-    for (const render of [reviewResultBody, nativeReviewBody]) {
-      const body = render(input);
-      expect(body.match(/<details>/g)).toHaveLength(1);
-      expect(body.match(/Invoice authorization/g)).toHaveLength(1);
-      expect(body).toContain("No invoice API exists in this repository");
-      expect(body).not.toContain("entry-1");
-      expect(body).not.toContain("Alias crawl was blocked");
-      expect(body).not.toContain("No browser was available");
-      expect(body).not.toContain("untrusted output");
-      expect(body).not.toContain("General note");
-      expect(body).not.toContain(input.findings[0]!.title);
-    }
+  test("dismissal removes outstanding count distinctly from a verified fix", () => {
+    const dismissed = { ...finding(), status: "deferred" as const, dismissal: { reason: "The maintainer accepted this tradeoff", actor: "maintainer", head: "a".repeat(40), commentId: "123" } };
+    const body = reviewResultBody(report([dismissed]));
+    expect(body).toContain("Slop Sheriff: clear");
+    expect(body).toContain("Accepted dismissals");
+    expect(body).toContain("not a verified fix");
   });
 
-  test("native review submission does not announce completion before thread delivery finishes", () => {
-    for (const findings of [[], [finding()]] as const) {
-      const body = nativeReviewBody(report(findings), { blocking: true, profile: "balanced" });
-      expect(body).toStartWith("## 💬 Slop Sheriff: review findings");
-      expect(body).toContain("Check Run for delivery status");
-      expect(body).not.toContain("approved");
-      expect(body).not.toContain("complete");
-      expect(body).not.toContain("posted inline");
-    }
-  });
-
-  test("shows a complete result when no findings qualify", () => {
-    const body = reviewResultBody(report([]));
-    expect(body).toContain("## ✅ Slop Sheriff: approved");
-    expect(body).toContain("No findings were reported.");
-    expect(body).toContain("🚨 0 blocking · ⚠️ 0 important · 💡 0 improvements");
-  });
-
-  test("summarizes findings while leaving their detail inline", () => {
-    const body = reviewResultBody(
-      report([finding("IMPORTANT"), { ...finding("IMPROVEMENT"), id: "CR-2" }]),
-    );
-    expect(body).toContain("2 findings were detected; 2 were posted inline");
-    expect(body).toContain("⚠️ 1 important");
-    expect(body).toContain("💡 1 improvement");
+  test("native review submission never announces completion before delivery", () => {
+    const body = nativeReviewBody(report([finding()]));
+    expect(body).toStartWith("## 💬 Slop Sheriff: review findings");
+    expect(body).not.toContain("Slop Sheriff: clear");
+    expect(body).not.toContain("Slop Sheriff: changes needed");
   });
 
   test("targets the exact head-side diff line and falls back to the file", () => {
@@ -221,35 +172,6 @@ describe("native GitHub review presentation", () => {
     expect(findingBody(finding(), "file")).toContain(
       "Reported location: `src/review.ts`, line 11",
     );
-  });
-
-  test("keeps nitpicks visible while profiles control inline publication", () => {
-    const nitpick = finding("NITPICK");
-    const balanced = reviewResultBody(report([nitpick]));
-    expect(balanced).toContain("1 finding was detected; 0 were posted inline");
-    expect(balanced).toContain("🧹 1 nitpick detected · hidden by balanced profile");
-
-    const thorough = reviewResultBody(report([nitpick]), {
-      blocking: false,
-      profile: "thorough",
-    });
-    expect(thorough).toContain("1 finding was detected; 1 was posted inline");
-    expect(thorough).toContain("🧹 1 nitpick");
-  });
-
-  test("requests changes only when blocking policy has a material finding", () => {
-    const important = report([finding("IMPORTANT")]);
-    expect(reviewResultBody(important)).toContain(
-      "## 💬 Slop Sheriff: review complete",
-    );
-    expect(
-      reviewResultBody(important, { blocking: true, profile: "balanced" }),
-    ).toContain("## ❌ Slop Sheriff: changes requested");
-
-    const nitpick = report([finding("NITPICK")]);
-    expect(
-      reviewResultBody(nitpick, { blocking: true, profile: "thorough" }),
-    ).toContain("## 💬 Slop Sheriff: review complete");
   });
 
   test("uses the left side for a finding on a deleted line", () => {

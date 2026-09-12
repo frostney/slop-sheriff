@@ -128,8 +128,10 @@ personality: true
 profile: balanced
 ```
 
-Set `personality: false` to turn off cowboy language. Findings remain technical
-in both modes. Advisory mode keeps merge decisions with you. Setting
+Select `voice: theatrical` (default), `voice: understated`, or `voice: off`.
+`personality: false` also disables cowboy language. Add `voiceGuide` with a trusted-base
+repository-relative Markdown path for custom style; see [the tone guide](brand.md).
+Evidence and recommendations remain invariant across modes. Advisory mode keeps merge decisions with you. Setting
 `blocking: true` enables approval/request-changes reviews; configuring required
 Checks is a separate repository-owner decision. See the
 [configuration reference](../README.md#trusted-repository-configuration) for
@@ -156,3 +158,22 @@ registered name. A draft PR is ignored, including manual commands.
 See the [deployment and pilot guide](deployment.md) for exact-revision rollout,
 observability, and recovery. Slop Sheriff reviews code; it does not push fixes,
 merge PRs, or change repository settings.
+
+## Accepting a finding without a code fix
+
+A repository maintainer with write, maintain, or admin permission can comment:
+
+```text
+@slop-sheriff dismiss CR-1 The booking link is explicitly deferred until the owner creates it.
+```
+
+The command requires an explicit reason and a completed review of the current
+base and head. Slop Sheriff records the maintainer, reason and commit, removes
+that concern from the outstanding count, and resolves its own thread with an
+acceptance reply. It does not claim a verified fix. Resolving a thread manually
+alone does not dismiss its finding.
+
+The same accepted concern retains its disposition in subsequent reviews.
+Changed consequence, remedy, severity or file scope requires a new assessment;
+acceptance cannot silently suppress a different concern. The model cannot create
+or alter maintainer dismissal metadata.

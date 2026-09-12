@@ -20,17 +20,17 @@ function selected(...files: PatchFile[]) {
 describe("specialists selected from changed review needs", () => {
   test("ordinary behavior gets core review and independent real-interface checks", () => {
     expect(selected(change("src/total.ts", "return count;", "return count + 1;")))
-      .toEqual(["engineering-quality", "test-against-spec"]);
+      .toEqual(["claim-and-specification", "engineering-quality", "test-against-spec"]);
   });
   test("comments and docs do not dispatch unrelated runtime and test-health work", () => {
     expect(selected(change("src/total.ts", "// Count the values", "// Count only active values")))
-      .toEqual(["engineering-quality", "writing-quality"]);
+      .toEqual(["claim-and-specification", "engineering-quality", "writing-quality"]);
     expect(selected(change("README.md", "Welcome to the project.", "Read the setup guide.")))
-      .toEqual(["engineering-quality", "writing-quality"]);
+      .toEqual(["claim-and-specification", "engineering-quality", "writing-quality"]);
   });
   test("tests get independent brittleness review without duplicating implementation verification", () => {
     expect(selected(change("tests/total.test.ts", "expect(total()).toBe(1);", "expect(total()).toBe(2);")))
-      .toEqual(["engineering-quality", "test-health"]);
+      .toEqual(["claim-and-specification", "engineering-quality", "test-health"]);
   });
   test("lock and binary changes retain core ownership without irrelevant specialists", () => {
     expect(selected(change("bun.lock", "old", "new"), { path: "logo.png", status: "modified", blobSha: "a", patch: null }))

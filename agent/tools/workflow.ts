@@ -5,7 +5,7 @@ import { reviewOrchestrationPlan, verifyReviewLaneReceipt } from "../lib/review-
 import type { ReviewAxis } from "../../src/review/axes";
 
 export default defineWorkflowTool({
-  description: "Run the application-owned lane and scout protocol for the trusted prepared review. Starts active axes concurrently, continues explicit checkpointed incomplete lanes, and enforces sixteen dispatches. Coordinator only. Actual terminal checkpoint validation and recovery remain required after completion.",
+  description: "Run the application-owned lane and scout protocol for the trusted prepared review. Starts active axes concurrently, continues explicit checkpointed incomplete lanes, and reserves sixteen dispatches per admitted lane, including its scouts and continuations. Coordinator only. Actual terminal checkpoint validation and recovery remain required after completion.",
   inputSchema: reviewWorkflowInputSchema,
   async execute({ context }, ctx) {
     "use workflow";

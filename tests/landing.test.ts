@@ -30,8 +30,8 @@ describe("public landing routes", () => {
     expect(html).toContain("subsequently fixed");
     expect(html).not.toContain("Synthetic example");
     expect(html).not.toContain("invoice");
-    expect(html).not.toContain("<details>");
-    const visibleText = html.split("<body>")[1]!.replace(/<[^>]+>/g, " ").replace(/&[^;]+;/g, " ");
+    expect(html).toContain("<summary>Evidence and recommended change</summary>");
+    const visibleText = html.split("<body>")[1]!.replace(/<details>[\s\S]*?<\/details>/g, " ").replace(/<[^>]+>/g, " ").replace(/&[^;]+;/g, " ");
     expect(visibleText.trim().split(/\s+/u).length).toBeGreaterThanOrEqual(310);
     expect(visibleText.trim().split(/\s+/u).length).toBeLessThanOrEqual(350);
     expect(html).not.toContain("<script");

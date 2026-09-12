@@ -1,9 +1,12 @@
+import { reviewPolicyDigest } from "../config/review-policy-identity";
 import { z } from "zod";
 import type { SessionAuthContext } from "eve/context";
+import { trustedVoiceGuideAttribute } from "../config/trusted-review-config";
 import { routingAttribute } from "../models/routing";
 
 export const reviewContextAttributes = {
   baseSha: "known_good_review_base_sha",
+  reviewPolicyDigest: "known_good_review_policy_digest",
   event: "known_good_review_event",
   headSha: "known_good_review_head_sha",
   memoryAdmission: "known_good_review_memory_admission",
@@ -25,6 +28,7 @@ const trustedGitHubContextSchema = z.object({
   repositoryDatabaseId: z.coerce.number().int().positive().optional(),
   repositoryId: z.string().min(1),
   baseSha: z.string().min(1),
+  reviewPolicyDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   headSha: z.string().min(1),
   memoryAdmission: z.string().min(1).optional(),
   patchFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -37,6 +41,7 @@ export function withTrustedReviewContext(
   values: {
     readonly baseSha: string;
     readonly configSource: string;
+    readonly voiceGuideContent?: string;
     readonly event: string;
     readonly headSha: string;
     readonly memoryAdmission?: string;
@@ -58,7 +63,9 @@ export function withTrustedReviewContext(
     attributes: {
       ...attributes,
       [routingAttribute]: values.configSource,
+      [trustedVoiceGuideAttribute]: values.voiceGuideContent ?? "",
       [reviewContextAttributes.baseSha]: values.baseSha,
+      [reviewContextAttributes.reviewPolicyDigest]: reviewPolicyDigest(values.configSource, values.baseSha),
       [reviewContextAttributes.event]: values.event,
       [reviewContextAttributes.headSha]: values.headSha,
       ...(values.memoryAdmission ? { [reviewContextAttributes.memoryAdmission]: values.memoryAdmission } : {}),
@@ -104,6 +111,7 @@ export function trustedGitHubContext(
       auth.attributes[reviewContextAttributes.repositoryDatabaseId],
     repositoryId: auth.attributes[reviewContextAttributes.repositoryId],
     baseSha: auth.attributes[reviewContextAttributes.baseSha],
+    reviewPolicyDigest: auth.attributes[reviewContextAttributes.reviewPolicyDigest],
     headSha: auth.attributes[reviewContextAttributes.headSha],
     memoryAdmission: auth.attributes[reviewContextAttributes.memoryAdmission],
     patchFingerprint:

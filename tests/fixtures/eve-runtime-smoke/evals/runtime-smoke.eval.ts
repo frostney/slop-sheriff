@@ -35,6 +35,19 @@ export default defineEval({
       t.check((await t.target.fetch("/robots{.txt}", { method })).status, equals(404));
     }
 
+    const projectSession = t.newSession();
+    const projectTurn = await projectSession.send("KGR-EVAL-AUTHORED-ROOT KGR-EVAL-PROJECT-LANES");
+    projectTurn.expectOk();
+    projectTurn.messageIncludes("AUTHORED-REVIEW-COMPLETE");
+    projectTurn.noFailedActions();
+    const projectChildren = projectTurn.events.filter((event) => event.type === "subagent.called");
+    await t.require(projectChildren.length, equals(2));
+    for (const event of projectChildren) {
+      const child = await t.target.attachSession(event.data.childSessionId);
+      child.succeeded();
+      child.calledTool("fixture_checkpoint", { count: 1 });
+    }
+
     const budgetSession = t.newSession();
     const budget = await budgetSession.send("KGR-EVAL-BUDGET-ROOT");
     budget.expectOk();

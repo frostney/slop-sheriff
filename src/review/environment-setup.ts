@@ -283,8 +283,6 @@ export function planReviewEnvironment(files: ReadonlyMap<string, string>, paths:
   return { steps, tools };
 }
 
-export const reviewerBrowserInstallSpec = "agent-browser@0.37.1";
-
 export async function prepareReviewerBrowser(sandbox: Pick<SetupSandbox, "run">): Promise<NonNullable<EnvironmentSetup["browser"]>> {
   const nativeSandbox = {
     id: "review-setup",
@@ -293,7 +291,7 @@ export async function prepareReviewerBrowser(sandbox: Pick<SetupSandbox, "run">)
       return { exitCode: result.exitCode, stdout: String(result.stdout), stderr: String(result.stderr) };
     },
   };
-  await installAgentBrowser(nativeSandbox, { installSpec: reviewerBrowserInstallSpec });
+  await installAgentBrowser(nativeSandbox);
   const location = await sandbox.run({ command: 'printf "%s/.local/bin/agent-browser" "$HOME"' });
   const command = String(location.stdout).trim();
   if (location.exitCode !== 0 || !command.startsWith("/")) throw new Error("Review browser installer did not provide an absolute executable path");

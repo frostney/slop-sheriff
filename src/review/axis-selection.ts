@@ -1,5 +1,6 @@
 import { discoverabilityApplies } from "./discoverability";
 import { hasCompletePatch, type PatchFile } from "./effective-patch";
+import type { ProjectLane } from "./project-lanes";
 import { reviewAxes, type ReviewAxis } from "./axes";
 
 const binary = /\.(?:png|jpe?g|gif|webp|ico|avif|woff2?|ttf|mp[34]|zip|gz|pdf|wasm)$/i;
@@ -21,7 +22,7 @@ export interface ReviewAxisDecision {
 }
 
 /** Central triage retains a broad core review; it never uses diff-size budgets. */
-export function selectReviewAxes(files: readonly PatchFile[], publicRoots: readonly string[]): ReviewAxisDecision[] {
+export function selectReviewAxes(files: readonly PatchFile[], publicRoots: readonly string[], lanes: readonly ProjectLane[] = []): ReviewAxisDecision[] {
   const reasons = new Map<ReviewAxis, Map<string, string>>();
   const select = (axis: ReviewAxis, path: string, reason: string) => {
     const matches = reasons.get(axis) ?? new Map<string, string>();
@@ -31,7 +32,9 @@ export function selectReviewAxes(files: readonly PatchFile[], publicRoots: reado
   for (const file of files) {
     const path = file.path;
     select("engineering-quality", path, "Core correctness, claim alignment, reuse and test-value review.");
-    if (binary.test(path) || lock.test(path)) continue;
+    if (binary.test(path)) continue;
+    if (source.test(path) || prose.test(path)) select("claim-and-specification", path, "Changed behavior or documentation must be compared with relevant existing requirements, including unchanged sources.");
+    if (lock.test(path) && hasCompletePatch(file)) continue;
     const tests = testPath.test(path);
     const docs = prose.test(path) && !manifest.test(path);
     const known = source.test(path) || docs || configuration.test(path) || manifest.test(path) || /(?:^|\/)(?:Dockerfile|Makefile|\.gitignore|\.gitattributes)$/.test(path);
@@ -71,11 +74,17 @@ export function selectReviewAxes(files: readonly PatchFile[], publicRoots: reado
     }
   }
   if (!reasons.has("engineering-quality")) reasons.set("engineering-quality", new Map());
-  return reviewAxes.map((axis) => ({
+  const builtIns = reviewAxes.map((axis) => ({
     axis, selected: reasons.has(axis),
     reason: reasons.has(axis)
       ? [...new Set(reasons.get(axis)!.values())].join(" ") || "Core review checks the supplied scope."
       : "No separate specialist obligation was found in the changed content; the core review retains overall correctness, claims and reuse.",
     paths: [...(reasons.get(axis)?.keys() ?? [])],
   }));
+  return [...builtIns, ...lanes.map((lane) => {
+    const paths = files.filter((file) => lane.always || lane.applicability?.paths.some((prefix) =>
+      file.path === prefix || file.path.startsWith(`${prefix}/`) || file.previousPath === prefix || file.previousPath?.startsWith(`${prefix}/`))).map((file) => file.path);
+    return { axis: lane.id, selected: lane.always || paths.length > 0,
+      reason: lane.always ? "Trusted project configuration always activates this lane." : paths.length ? "Changed files match trusted project lane applicability." : "No changed files match trusted project lane applicability.", paths };
+  })];
 }

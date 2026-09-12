@@ -124,13 +124,13 @@ test("delta revalidation preserves original thread identity despite rewritten pr
   expect(mock.replies[0]?.body).toContain("timeout regression passes");
 });
 
-test("fixed-thread replies honor the personality switch", async () => {
+test("fixed-thread replies retain model-authored voice and exact commit", async () => {
   for (const personality of [true, false]) {
     const prior = report([finding()], "d".repeat(40));
-    const next = report(prior.findings.map((item) => ({ ...fixed(item), evidence: ["The regression probe passes. ".repeat(30)] })));
+    const next = report(prior.findings.map((item) => ({ ...fixed(item), resolutionSummary: personality ? "Partner, the transport now carries the configured deadline through every retry." : "The transport now carries the configured deadline through every retry.", evidence: ["The regression probe passes. ".repeat(30)] })));
     const mock = harness(staged(prior, next), prior.findings);
     await publishReview({ context, octokit: mock.octokit, report: next, config: { blocking: false, profile: "balanced", personality } });
-    expect(mock.replies[0]?.body.includes("Trail’s clear now, partner.")).toBe(personality);
+    expect(mock.replies[0]?.body.includes("Partner, the transport")).toBe(personality);
     expect(mock.replies[0]?.body).toContain("Verified fixed");
     expect(mock.replies[0]!.body.split("\n").slice(1).join("\n").length).toBeLessThanOrEqual(300);
   }
@@ -336,7 +336,7 @@ test("direct staging rejects verbose active findings before any GitHub request",
   let requests = 0;
   const octokit = new Octokit({ request: { fetch: async () => { requests += 1; return Response.json([]); } } });
   await expect(stageReviewPublication({ context, octokit, report: next, identity: state.pendingPublication!.identity }))
-    .rejects.toThrow("100-word inline limit");
+    .rejects.toThrow("200-word inline limit");
   expect(requests).toBe(0);
 });
 

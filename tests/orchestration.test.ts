@@ -40,14 +40,15 @@ function setup(options: { incomplete?: boolean; alwaysIncomplete?: boolean; fail
 }
 
 describe("authored review protocol", () => {
-  test("all seven axes retain signed checkpoint validation and the unchanged dispatch ceiling", async () => {
+  test("all seven axes retain signed checkpoint validation and independent dispatch reservations", async () => {
     const complete = setup({ axes: reviewAxes });
     const run = complete.run();
     expect(complete.calls).toHaveLength(7);
     expect(await run).toEqual({ complete: true, activeAxes: reviewAxes });
     const exhausted = setup({ axes: reviewAxes, alwaysIncomplete: true });
     await expect(exhausted.run()).rejects.toThrow("Review dispatch budget exhausted");
-    expect(exhausted.calls).toHaveLength(16);
+    expect(exhausted.calls).toHaveLength(22);
+    expect(exhausted.calls.filter((call) => call.key.includes(":engineering-quality:"))).toHaveLength(16);
     expect(await readLaneCheckpoint(exhausted.sandbox, identity, "engineering-quality")).toMatchObject({ status: "in-progress" });
   });
   test("model-authored context cannot override trusted identity, axes or the initial routing envelope", async () => {
@@ -175,10 +176,11 @@ describe("authored review protocol", () => {
     expect(fixture.calls).toHaveLength(3);
   });
 
-  test("enforces sixteen logical lane/scout dispatches per invocation", async () => {
+  test("enforces sixteen logical lane/scout dispatches per lane", async () => {
     const fixture = setup({ alwaysIncomplete: true });
     await expect(fixture.run()).rejects.toThrow("budget exhausted");
-    expect(fixture.calls).toHaveLength(16);
+    expect(fixture.calls).toHaveLength(18);
+    expect(fixture.calls.filter((call) => call.key.includes(":engineering-quality:"))).toHaveLength(16);
   });
 
   test.each(["forged", "cross-axis", "cross-axis-attestation", "stale-invocation", "different-root", "different-head", "wrong-attempt"])("rejects a %s receipt", async (variant) => {

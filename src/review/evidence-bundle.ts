@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ReviewAxis } from "./axes";
-import { reviewAxes } from "./axes";
+import { reviewAxisSchema } from "./axes";
 import { specialistEntryScope } from "./specialist-scope";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
@@ -172,7 +172,7 @@ function reviewEvidenceProgressPath(
   patchFingerprint: string,
   axis: ReviewAxis,
 ): string {
-  return `${reviewEvidenceDirectory(patchFingerprint)}/progress/${z.enum(reviewAxes).parse(axis)}.json`;
+  return `${reviewEvidenceDirectory(patchFingerprint)}/progress/${reviewAxisSchema.parse(axis)}.json`;
 }
 
 function reviewEvidencePacketReceiptPath(
@@ -181,7 +181,7 @@ function reviewEvidencePacketReceiptPath(
   sessionId: string,
 ): string {
   const sessionHash = createHash("sha256").update(sessionId).digest("hex");
-  return `${reviewEvidenceDirectory(patchFingerprint)}/packets/${z.enum(reviewAxes).parse(axis)}-${sessionHash}.json`;
+  return `${reviewEvidenceDirectory(patchFingerprint)}/packets/${reviewAxisSchema.parse(axis)}-${sessionHash}.json`;
 }
 
 export async function resetReviewEvidence(

@@ -21,3 +21,15 @@ export function checkpointContent(axis: ReviewAxis, incomplete = false): LaneChe
     },
   };
 }
+
+// Synthetic trusted-base data exercises the production parser and protocol.
+export const runtimeProjectConfig = `lanes:
+  - id: project-api
+    name: API compatibility
+    criteria: Preserve the documented wire envelope.
+    always: true
+  - id: project-accessibility
+    name: Accessible controls
+    criteria: Every interactive control has an accessible name.
+    always: true
+`;

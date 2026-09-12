@@ -260,10 +260,12 @@ requirements survive deferred revalidation. Hidden or unmatched findings and
 human threads stay open. Replacement threads are submitted before moved-thread
 cleanup. Per-thread failures preserve staged state and prevent completion;
 retries inspect existing replies and resolution state without repeating them.
-Inline findings use the shared Markdown/HTML formatter, at most 100 words with
-an optional short cowboy opener and a final Impact line of at most 300 characters.
-Assembly rejects overlong wording before persistence so the model can revise it.
-The compact main summary collapses out-of-scope coverage, while Check Runs and
+Inline findings use one shared Markdown/HTML formatter: emoji headline,
+severity, 25 to 45 word introduction, expandable evidence/principle/fix, Impact
+of at most 300 characters, and one-sentence Risk. The complete comment is at most
+200 words. Contextual voice comes from model-authored fields. The mutable current
+summary separates recommendation from GitHub enforcement and only expands
+additional actionable unrelated concerns. Check Runs and
 the canonical artifact retain detailed evidence. Check lookup is scoped to the current head and
 fixed aggregate and axis names.
 

@@ -1,3 +1,4 @@
+import { reviewPolicyDigest } from "../src/config/review-policy-identity";
 import { describe, expect, test } from "bun:test";
 import { planDispatch, reviewStateFromComments } from "../src/github/inbound";
 import { effectivePatchFingerprint } from "../src/review/effective-patch";
@@ -179,4 +180,22 @@ describe("GitHub inbound planning", () => {
       supersedesActiveReview: true,
     });
   });
+});
+
+
+test("changed trusted configuration or base invalidates semantic reuse, including legacy baselines", () => {
+  const digest = reviewPolicyDigest("", "base-one");
+  const old = completedState();
+  if (!old.baseline) throw new Error("Expected baseline");
+  const state = { ...old, baseline: { ...old.baseline, reviewPolicyDigest: digest } };
+  const dispatch = (policy: string, saved = state) => planDispatch({ action: "synchronize", draft: false, head: "same-patch-head", patchFiles: oldFiles, state: { kind: "valid", state: saved }, reviewPolicyDigest: policy });
+  expect(dispatch(digest).plan.kind).toBe("reuse");
+  for (const changed of [
+    reviewPolicyDigest("voice: off", "base-one"),
+    reviewPolicyDigest("model: openai/gpt-5.6-luna", "base-one"),
+    reviewPolicyDigest("", "base-two"),
+    reviewPolicyDigest('lanes: [{id: project-api, name: API, criteria: Preserve wire format, always: true}]', "base-one"),
+  ]) expect(dispatch(changed).plan).toMatchObject({ kind: "full", delaySeconds: 0 });
+  expect(planDispatch({ action: "synchronize", draft: false, head: "same-head", patchFiles: oldFiles, state: { kind: "valid", state: old }, reviewPolicyDigest: digest }).plan.kind).toBe("full");
+  expect(planDispatch({ action: "closed", draft: false, head: "same-head", patchFiles: oldFiles, state: { kind: "valid", state: old }, reviewPolicyDigest: digest }).plan.kind).toBe("cleanup");
 });

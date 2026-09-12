@@ -235,3 +235,51 @@ specialist checks executed successfully in the review sandbox.
 The repair candidate passes `bun run check`: TypeScript, 269 tests, 92 native
 Eve gates, discovery without diagnostics and production build. The recorded
 PR 61 replay preserves all four canonical transitions.
+
+## September 12: production integration of the agreed review design
+
+This revision implements the accepted grilling decisions in the application,
+not just the earlier isolated custom-lane feasibility probe.
+
+- Findings use severity emoji, a severity-only line, a 25–45-word introduction,
+  expandable evidence/principle/remedy, and visible Impact and Risk. The complete
+  comment remains within 200 words; Impact remains within 300 characters.
+- The model receives technically fluent cowboy-robot instructions with theatrical,
+  understated and off presets, plus a trusted-base custom voice guide. No runtime
+  opener table supplies personality. The historical PR42 finding in the landing
+  page uses the same formatter. See [all three examples](../review-examples.md).
+- Trusted configuration creates independently named project lanes in the standard
+  application. Routing, evidence, signed checkpoints, recovery, schemas, reports,
+  memory validation and GitHub Checks recognize their bounded registry. The native
+  Eve fixture exercises two project lanes through the production workflow.
+- Shared base/head requirement inventory includes relevant unchanged and linked
+  documents, DoD and configurable paths. Explicit checklist and normative clauses
+  carry individual evidence obligations. Required unverified checks block completion.
+- New-head state immediately withdraws old merge clearance. Authorized explicit
+  maintainer dismissals preserve attribution, remain distinct from verified fixes,
+  and survive matching later reviews. Model revalidation cannot forge dismissals.
+- Incomplete lockfile changes now receive conservative specialist coverage.
+  Failure continuation reconstructs specialist selection details from the trusted
+  configuration. Browser setup uses the installed native helper's version default.
+
+Validation on Bun 1.4.2, Eve 0.52.5 and AI SDK 7.0.97:
+
+- `bun run check`: both TypeScript projects, 347 tests with 1,860 assertions,
+  102/102 deterministic native Eve runtime gates, clean discovery and production
+  build passed.
+- `bun run replay:pr61`: all four recorded finding transitions preserved.
+- Browser checks verified collapsed/expanded details, keyboard activation, all
+  three voice examples and visible Impact/Risk. The 390px mobile page measured
+  390px document width, with no horizontal overflow.
+- The revised square robot icon was checked at 20, 24, 40, 64 and 128 pixels in
+  square and circular crops. Website asset export contains the new icon.
+
+Rendered evidence: [comments](assets/review-comments.png),
+[mobile landing](assets/landing-mobile.png), [avatar crops](assets/avatar-crops.png).
+
+This round ran no paid model review. Deterministic workflow checks establish the
+application contract, not model quality or comparative speed, token use or cost.
+Production still needs a rollout of this generic capability. The GitHub App icon
+upload requires fresh GitHub security authentication. The previously identified
+sandbox outbound-access finding remains unresolved; this PR is not certified for
+production or merge readiness by these implementation checks.

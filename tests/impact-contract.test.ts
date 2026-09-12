@@ -20,10 +20,15 @@ const draftFinding = {
   location: { path: "src/review.ts", line: 1, symbol: null },
   evidence: ["The same operation was published twice."],
   impact: "A retry produces duplicate comments. ".repeat(20),
+  requirementIds: [],
+  introduction: "The recorded publication path can replay the same operation without reusing its identity, so a retry exposes duplicate output to readers even though the original work already finished successfully.",
+  principle: "Retries must preserve the recorded publication identity.",
+  risk: "A retry can duplicate output for every reader of the affected review.",
   impactSummary: "A retry produces duplicate comments.",
   remedy: "Reuse the recorded publication identity.", staticOnly: true, churn: null,
 };
 const draft = {
+  actionSummary: "Reviewed the affected publication paths and retained the observed evidence.", additionalConcerns: [],
   scope: { claim: "Preserve publication identity", dirtyState: "clean" },
   coverage: { staticOnly: [], unreached: [] },
   churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] },
@@ -51,11 +56,13 @@ describe("bounded impact contract", () => {
     }) }) }) }).parse(fresh).properties.draft.properties.freshFindings.items.oneOf;
     expect(variants).toHaveLength(4);
     for (const variant of variants) {
-      expect(variant.required).toContain("impactSummary");
+      for (const field of ["impactSummary", "introduction", "principle", "risk", "requirementIds"]) expect(variant.required).toContain(field);
+      for (const field of ["id", "status", "dismissal"]) expect(variant.properties).not.toHaveProperty(field);
       expect(variant.properties.impactSummary).toMatchObject({ type: "string", minLength: 1, maxLength: 300 });
       expect(variant.properties.impact).not.toHaveProperty("maxLength");
     }
     const revalidation = await asSchema(recordReviewRevalidationInputSchema).jsonSchema;
+    expect(revalidation).not.toHaveProperty("properties.findings.items.oneOf.0.properties.dismissal");
     expect(revalidation).toHaveProperty("properties.findings.items.oneOf.0.properties.impactSummary.maxLength", 300);
     for (const category of ["CLAIM", "QUALITY", "ARCHITECTURE_RISK", "DISCOVERABILITY"] as const) {
       const candidate = { ...draftFinding, category, churn: category === "ARCHITECTURE_RISK" ? categoryChurn : null };
@@ -74,12 +81,12 @@ describe("bounded impact contract", () => {
   });
 
   test("carries lane summaries to canonical reports while accepting old checkpoints", async () => {
-    const { category: _category, severity: _severity, ...evidence } = draftFinding;
+    const { category: _category, severity: _severity, requirementIds: _requirementIds, ...evidence } = draftFinding;
     const report = {
       axis: "engineering-quality", scope: { ...draft.scope, inspectedSupportingContext: [] },
       coverage: draft.coverage, churn: draft.churn, probes: [],
       candidates: [{ ...evidence, uncertainty: [] }], verifiedClaims: [], limitations: [],
-      specialistChecks: null,
+      specialistChecks: null, requirementChecks: null,
     };
     const checkpoint = {
       status: "complete", reviewedEntries: [0], remainingEntries: [], observations: [], nextSteps: [], limitations: [],
@@ -89,7 +96,7 @@ describe("bounded impact contract", () => {
     expect(parsed.checkpoint?.completedReport?.candidates[0]?.impactSummary).toBe(evidence.impactSummary);
     const { uncertainty: _uncertainty, ...mappedEvidence } = parsed.checkpoint!.completedReport!.candidates[0]!;
     const assembled = assembleCanonicalReviewReport({ state: beginReportAssembly(identity), priorReport: null, generatedAt,
-      draft: { ...draft, freshFindings: [{ ...mappedEvidence, category: "QUALITY", severity: "IMPORTANT" }] } });
+      draft: { ...draft, freshFindings: [{ ...mappedEvidence, requirementIds: [], category: "QUALITY", severity: "IMPORTANT" }] } });
     expect(assembled.report?.findings[0]).toMatchObject({ impact: evidence.impact, impactSummary: evidence.impactSummary });
     const schema = await asSchema(reviewLaneCheckpointInputSchema).jsonSchema;
     expect(schema).toHaveProperty("properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.candidates.items.properties.impactSummary.maxLength", 300);
@@ -153,8 +160,8 @@ describe("bounded impact contract", () => {
     const full = `</details><script>alert('x')</script>\n\n${"e\u0301🤠".repeat(200)}\n\nThe retry duplicates comments.`;
     const finding = reviewFindingSchema.parse({ ...draftFinding, impact: full, id: "CR-1", status: "open" });
     const body = findingBody({ ...finding, impactSummary: "<img src=x> & **consequence**" });
-    expect(body).toEndWith("Impact: &lt;img src=x&gt; &amp; \\*\\*consequence\\*\\*");
-    expect(body).not.toContain("<details>");
+    expect(body).toContain("Impact: &lt;img src=x&gt; &amp; \\*\\*consequence\\*\\*");
+    expect(body).toContain("<summary>Evidence and recommended change</summary>");
     expect(body).not.toContain("Smallest remedy");
     expect(body).not.toContain("<script>");
     expect(body).not.toContain("e\u0301🤠".repeat(200));

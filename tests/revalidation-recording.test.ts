@@ -1,3 +1,4 @@
+import { reviewPolicyDigest } from "../src/config/review-policy-identity";
 import { expect, spyOn, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import recordTool from "../agent/tools/record_review_revalidation";
@@ -22,7 +23,7 @@ test("revalidation rejects unsupported fixes before immutable recording and acce
     coverage: { activeAxes: ["engineering-quality"], skippedAxes: [], staticOnly: [], unreached: [] },
     churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] }, probes: [], findings: [original], verifiedClaims: [], limitations: [],
   };
-  const identity = { executionRevision: "review-report-v2" as const, repositoryId: "R_repo", pullRequest: 1,
+  const identity = { reviewPolicyDigest: reviewPolicyDigest("", "a".repeat(40)), executionRevision: "review-report-v2" as const, repositoryId: "R_repo", pullRequest: 1,
     baseSha: prior.scope.base, headSha: "b".repeat(40), patchFingerprint: "c".repeat(64), planKind: "delta" as const,
     baselineHead: prior.scope.head, reviewPaths: ["src/api.ts"], activeAxes: ["engineering-quality" as const], selectedFindingIds: ["CR-1"] };
   let report: ReportAssemblyState | null = beginReportAssembly(identity);
@@ -46,7 +47,7 @@ test("revalidation rejects unsupported fixes before immutable recording and acce
     await expect(execute({ findings: [{ ...original, status: "fixed" }] }, ctx)).rejects.toThrow("requires runtime evidence");
     expect(report?.revalidatedFindings).toEqual([]);
     expect(recovery?.stage).toBe("axes-complete");
-    await expect(execute({ findings: [{ ...original, status: "open", evidence: ["Verbose observation. ".repeat(100)] }] }, ctx)).rejects.toThrow("100-word inline limit");
+    await expect(execute({ findings: [{ ...original, status: "open", evidence: ["Verbose observation. ".repeat(100)] }] }, ctx)).rejects.toThrow("200-word inline limit");
     expect(report?.revalidatedFindings).toEqual([]);
     await execute({ findings: [{ ...original, status: "fixed", staticOnly: false, evidence: ["CLI timeout probe terminates at the configured deadline."] }] }, ctx);
     expect(report?.revalidatedFindings[0]?.status).toBe("fixed");
