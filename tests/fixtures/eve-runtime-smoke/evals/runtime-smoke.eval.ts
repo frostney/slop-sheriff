@@ -3,7 +3,7 @@ import { equals, includes } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Checks public GET/HEAD responses through compiled Eve routes and routed root-copy child streaming through production instrumentation.",
+    "Checks compiled public routes, routed root-copy and project-lane execution, structured-output recovery, workflow admission, and production instrumentation.",
   tags: ["mock-model", "runtime-smoke"],
   async test(t) {
     // Exercise production channel discovery and Nitro's compiled route names.

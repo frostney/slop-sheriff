@@ -18,8 +18,9 @@ export const reviewContextAttributes = {
   repositoryId: "known_good_review_repository_id",
 } as const;
 
-const trustedGitHubContextSchema = z.object({
+export const trustedGitHubContextSchema = z.object({
   installationId: z.coerce.number().int().positive(),
+  deliveryId: z.string().regex(/^[A-Za-z0-9._-]+$/).optional(),
   owner: z.string().min(1),
   repo: z.string().min(1),
   pullRequest: z.coerce.number().int().positive(),
@@ -101,6 +102,7 @@ export function trustedGitHubContext(
   const [owner, repo] = repository.split("/");
   return trustedGitHubContextSchema.parse({
     installationId: auth.attributes.installation_id,
+    ...(typeof auth.attributes.delivery_id === "string" && auth.attributes.delivery_id ? { deliveryId: auth.attributes.delivery_id } : {}),
     owner,
     repo,
     pullRequest: auth.attributes.pull_request_number,
