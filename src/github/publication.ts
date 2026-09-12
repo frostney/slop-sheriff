@@ -70,7 +70,7 @@ export type ActiveReviewIdentity =
   | { readonly kind: "full"; readonly reason: "initial" | "manual" };
 
 export function activeReviewExternalId(
-  context: Pick<TrustedGitHubContext, "baseSha" | "headSha" | "pullRequest">,
+  context: Pick<TrustedGitHubContext, "baseSha" | "headSha" | "pullRequest" | "deliveryId">,
   review: ActiveReviewIdentity,
 ): string {
   return [
@@ -80,6 +80,7 @@ export function activeReviewExternalId(
     context.headSha,
     review.kind,
     review.kind === "full" ? review.reason : "none",
+    ...(context.deliveryId ? [context.deliveryId] : []),
   ].join(":");
 }
 
@@ -91,10 +92,11 @@ export function parseActiveReviewExternalId(
   >,
 ): ActiveReviewIdentity | null {
   if (!externalId) return null;
-  const [name, pullRequest, baseSha, headSha, kind, reason, extra] =
+  const [name, pullRequest, baseSha, headSha, kind, reason, deliveryId, extra] =
     externalId.split(":");
   if (
     extra !== undefined ||
+    (deliveryId !== undefined && !/^[A-Za-z0-9._-]+$/.test(deliveryId)) ||
     !reviewCheckNames.some((candidate) => candidate === name) ||
     pullRequest !== String(expected.pullRequest) ||
     baseSha !== expected.baseSha ||
@@ -1416,4 +1418,27 @@ export async function publishBudgetExhaustedCheck(input: {
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
   );
+}
+
+/** Finalize only the still-running attempt that suffered a terminal runtime failure. */
+export async function publishSessionFailure(input: {
+  readonly context: TrustedGitHubContext;
+  readonly message: string;
+  readonly octokit: OctokitClient;
+}): Promise<void> {
+  const { context, octokit } = input;
+  if (!context.deliveryId) return;
+  const { data: pr } = await octokit.rest.pulls.get({ owner: context.owner, repo: context.repo, pull_number: context.pullRequest });
+  if (pr.state !== "open" || pr.draft || pr.base.sha !== context.baseSha || pr.head.sha !== context.headSha) return;
+  const check = await latestCheck(octokit, context);
+  const review = parseActiveReviewExternalId(check?.external_id, context);
+  if (!review || check?.status === "completed" || check?.external_id !== activeReviewExternalId(context, review)) return;
+  const state = await readLatestReviewState(octokit, context);
+  if (state) {
+    await writeReviewState(octokit, context, {
+      ...state, currentHead: context.headSha, initialFullStatus: "failed",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  await publishFailClosedCheck(input);
 }

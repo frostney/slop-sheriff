@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ReviewAxis } from "./axes";
 import { reviewAxisSchema } from "./axes";
 import { specialistEntryScope } from "./specialist-scope";
+import { projectEmbeddedMediaPatch } from "./embedded-media";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -288,18 +289,25 @@ export async function readReviewEvidencePatch(
   if (!entry) {
     throw new Error(`No included review patch exists for ${input.path}`);
   }
-  const source = await sandbox.readTextFile({
+  const rawSource = await sandbox.readTextFile({
     path: `${reviewEvidenceDirectory(manifest.patchFingerprint)}/${entry.patchFile}`,
   });
-  if (source === null) {
+  if (rawSource === null) {
     throw new Error(`Prepared review patch is unavailable for ${input.path}`);
   }
-  const observedSha256 = createHash("sha256").update(source).digest("hex");
+  const observedSha256 = createHash("sha256").update(rawSource).digest("hex");
   if (observedSha256 !== entry.patchSha256) {
     throw new Error(
       `Prepared review patch failed integrity validation for ${input.path}`,
     );
   }
+  // Validate the original artifact before deriving a compact display view.
+  // Cursors address this deterministic view; the manifest/hash still identify
+  // the untouched raw diff, available for exact source and image inspection.
+  const source = projectEmbeddedMediaPatch(rawSource, {
+    path: entry.path,
+    rawPatchPath: `${reviewEvidenceDirectory(manifest.patchFingerprint)}/${entry.patchFile}`,
+  });
   const cursor = z
     .number()
     .int()

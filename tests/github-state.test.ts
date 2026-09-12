@@ -62,6 +62,11 @@ function reviewAuth(
 ): SessionAuthContext {
   return {
     attributes: {
+      repository: "acme/widget", installation_id: "1", pull_request_number: "53", delivery_id: "delivery-1",
+      [reviewContextAttributes.repositoryId]: "R_widget",
+      [reviewContextAttributes.repositoryCreatedAt]: "0",
+      [reviewContextAttributes.baseSha]: "a".repeat(40),
+      [reviewContextAttributes.headSha]: "b".repeat(40),
       [reviewContextAttributes.event]: event,
       [reviewContextAttributes.plan]: JSON.stringify({ kind }),
     },
@@ -204,6 +209,9 @@ describe("GitHub-owned state and telemetry", () => {
       },
       send: async (_message: unknown, options: ChannelSendOptions) => {
         events.push(`send:${options.mode ?? "conversation"}`);
+        if (options.mode === "task") expect(options).toMatchObject({ state: {
+          slopSheriffReviewContext: { deliveryId: "delivery-1", headSha: "b".repeat(40), repository: "acme/widget" },
+        } });
         return {} as Session;
       },
     })) as unknown as ChannelFrom;

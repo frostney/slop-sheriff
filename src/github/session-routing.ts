@@ -1,6 +1,6 @@
 import type { ChannelFrom } from "eve/channels";
 import type { SessionAuthContext } from "eve/context";
-import { reviewContextAttributes } from "./trusted-context";
+import { reviewContextAttributes, trustedGitHubContext } from "./trusted-context";
 
 export function startsFreshReviewSession(
   auth: SessionAuthContext | null,
@@ -39,7 +39,12 @@ export function withFreshReviewSessions<TState>(
         }
         return from(address).send(
           message,
-          freshReview ? { ...options, mode: "task" } : options,
+          freshReview ? {
+            ...options, mode: "task",
+            // The terminal workflow error path has no turn context. Seed its
+            // trusted identity before the first step so retries cannot lose it.
+            state: { ...("state" in options ? options.state : {}), slopSheriffReviewContext: trustedGitHubContext(options.auth) },
+          } : options,
         );
       },
     };

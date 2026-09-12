@@ -1,3 +1,4 @@
+import { handleReviewSessionFailure } from "../lib/session-failure";
 import { reviewPolicyDigest } from "../../src/config/review-policy-identity";
 import { validateFindingPresentation } from "../../src/github/review-presentation";
 import type { ReviewReport } from "../../src/review/findings";
@@ -241,6 +242,7 @@ function publicationContext(
   }
   return {
     installationId,
+    deliveryId: ctx.delivery.id,
     owner: ctx.repository.owner,
     repo: ctx.repository.name,
     repository: ctx.repository.fullName,
@@ -787,6 +789,7 @@ const channel = githubChannel({
     // product surface. Suppress the ordinary model reply so one turn cannot
     // create a second review surface.
     "message.completed": () => {},
+    "session.failed": handleReviewSessionFailure,
   },
 });
 
