@@ -74,9 +74,9 @@ describe("public landing routes", () => {
   });
 
   test("production aliases stay noindex and forwarded hosts cannot grant indexing", async () => {
-    for (const hostname of ["known-good-review.vercel.app", "candidate.vercel.app", "127.0.0.1", "slop-sheriff.vercel.app", "slop-sheriff.vercel.app.attacker.example"]) {
+    for (const hostname of ["slop-sheriff.vercel.app", "www.slop-sheriff.dev", "known-good-review.vercel.app", "candidate.vercel.app", "127.0.0.1", "slop-sheriff.dev.attacker.example"]) {
       const response = landingResponse(new Request(`https://${hostname}/`, {
-        headers: { "x-forwarded-host": "slop-sheriff.vercel.app" },
+        headers: { "x-forwarded-host": "slop-sheriff.dev" },
       }), "production");
       expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
       const html = await response.text();

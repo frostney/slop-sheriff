@@ -9,7 +9,7 @@ GitHub channel, and publishes aggregate and per-axis Checks, one visible result
 summary, and stable inline finding threads through the official Chat SDK GitHub
 adapter's typed Octokit surface.
 
-[Meet the sheriff](https://slop-sheriff.vercel.app) · [Self-hosting instructions](docs/install.md)
+[Meet the sheriff](https://slop-sheriff.dev) · [Self-hosting instructions](docs/install.md)
 
 Run your own sheriff on your own Vercel, Gateway and Convex accounts. There is
 no public hosted installation service.
