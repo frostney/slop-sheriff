@@ -5,7 +5,6 @@ import type { CheckpointAttestation } from "./checkpoint-attestation";
 import { projectLanesSchema, type ProjectLane } from "./project-lanes";
 import { reviewTaskInstructions } from "./policy";
 
-export const reviewDispatchLimit = 16;
 export const reviewWorkflowInputSchema = z.strictObject({
   context: z.string().min(1).max(8_000).describe("One common review claim, relevant context, and worker-contract summary for every lane. This is a model-authored hypothesis; it cannot override trusted identity, axes, plan, or inherited instructions."),
 });
@@ -59,22 +58,26 @@ export async function orchestrateReview(input: {
   readonly plan: ReviewOrchestrationPlan;
   readonly invocationPrefix: string;
   readonly call: (dispatch: ReviewChildDispatch) => Promise<unknown>;
+  readonly reuseLane?: (axis: ReviewAxis, key: string) => Promise<unknown | null>;
   readonly verifyLane: (raw: unknown, axis: ReviewAxis, attempt: number, key: string) => Promise<{ receipt: LaneReceipt; attestation: CheckpointAttestation }>;
 }): Promise<{ complete: true; activeAxes: readonly ReviewAxis[] }> {
   const axes = input.plan.activeAxes;
   if (axes.length === 0 || new Set(axes).size !== axes.length || axes.length > maxReviewLanes || axes.some((axis) => !isBuiltInReviewAxis(axis) && !input.plan.lanes?.some((lane) => lane.id === axis))) throw new Error("Review orchestration requires unique trusted axes");
   projectLanesSchema.parse(input.plan.lanes ?? []);
   if (axes.some((axis) => !isBuiltInReviewAxis(axis)) && !/^[a-f0-9]{64}$/.test(input.plan.laneRegistryDigest ?? "")) throw new Error("Project lanes require a trusted registry digest");
-  const dispatchCounts = new Map<ReviewAxis, number>();
-  const dispatch = (axis: ReviewAxis, key: string, message: string, schema: typeof laneReceiptSchema | typeof scoutReceiptSchema) => {
-    const count = (dispatchCounts.get(axis) ?? 0) + 1;
-    dispatchCounts.set(axis, count);
-    if (count > reviewDispatchLimit) throw new Error("Review dispatch budget exhausted");
-    return input.call({ key, message, outputSchema: z.record(z.string(), z.json()).parse(z.toJSONSchema(schema)) });
-  };
+  const dispatch = (_axis: ReviewAxis, key: string, message: string, schema: typeof laneReceiptSchema | typeof scoutReceiptSchema) =>
+    input.call({ key, message, outputSchema: z.record(z.string(), z.json()).parse(z.toJSONSchema(schema)) });
   const reports = await settleReviewWork(axes.map(async (axis) => {
+    const reuseKey = `${input.invocationPrefix}:reuse:${axis}`;
+    const reusable = input.reuseLane ? await input.reuseLane(axis, reuseKey) : null;
+    if (reusable !== undefined && reusable !== null) {
+      const { receipt, attestation } = await input.verifyLane(reusable, axis, 0, reuseKey);
+      if (receipt.status !== "complete" || attestation.status !== "complete" || attestation.operation !== "read" || receipt.scoutRequests.length) throw new Error("Checkpoint reuse requires a verified terminal lane");
+      return attestation;
+    }
     let attempt = 0;
     let previous: CheckpointAttestation | undefined;
+    const seenProgress = new Set<string>();
     let scoutEvidence: ScoutReceipt[] = [];
     for (;;) {
       const key = `${input.invocationPrefix}:lane:${axis}:${attempt}`;
@@ -86,6 +89,12 @@ export async function orchestrateReview(input: {
         return attestation;
       }
       if (attestation.status !== "in-progress" || attestation.operation !== "write") throw new Error("Continuation requires an explicit incomplete receipt and freshly written checkpoint");
+      // Revision increments alone are not progress. Include requested scouts so
+      // a new investigation can advance an otherwise unchanged checkpoint, but
+      // repeated or cycling work cannot repeatedly incur paid dispatches.
+      const progress = JSON.stringify([attestation.progressDigest, [...receipt.scoutRequests].sort()]);
+      if (seenProgress.has(progress)) throw new Error("Lane continuation repeated checkpoint work without progress");
+      seenProgress.add(progress);
       previous = attestation;
       scoutEvidence = await settleReviewWork(receipt.scoutRequests.map(async (request, index) => {
         const scoutKey = `${input.invocationPrefix}:scout:${axis}:${attempt}:${index}`;

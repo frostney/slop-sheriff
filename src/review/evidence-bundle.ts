@@ -114,7 +114,7 @@ const reviewEvidenceCursorSchema = z.object({
   characterOffset: z.number().int().nonnegative(),
 });
 
-const reviewEvidenceProgressSchema = z.object({
+export const reviewEvidenceProgressSchema = z.object({
   cursor: reviewEvidenceCursorSchema.nullable(),
   completedEntries: z.array(z.number().int().nonnegative()),
 });
@@ -235,7 +235,7 @@ export async function writeReviewEvidenceManifest(
 }
 
 export async function readReviewEvidenceManifest(
-  sandbox: ReviewEvidenceSandbox,
+  sandbox: Pick<ReviewEvidenceSandbox, "readTextFile">,
   identity: ReviewEvidenceIdentity,
 ): Promise<ReviewEvidenceManifest> {
   const source = await sandbox.readTextFile({
@@ -343,7 +343,7 @@ export async function readReviewEvidencePatch(
 }
 
 export async function readReviewEvidenceProgress(
-  sandbox: ReviewEvidenceSandbox,
+  sandbox: Pick<ReviewEvidenceSandbox, "readTextFile">,
   manifest: ReviewEvidenceManifest,
   axis: ReviewAxis,
 ): Promise<ReviewEvidenceProgress> {

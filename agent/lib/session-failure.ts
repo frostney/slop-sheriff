@@ -1,3 +1,5 @@
+import { classifyReviewInterruption } from "../../src/lifecycle/prerequisites";
+import { lifecycleConfigured, stageLifecyclePublication } from "../../src/lifecycle/client";
 import { z } from "zod";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { publishSessionFailure } from "../../src/github/publication";
@@ -14,13 +16,14 @@ export async function handleReviewSessionFailure(
   // bounded application wording, never the serialized error or its stack.
   const creditFailure = /insufficient_funds|positive credit balance/i.test(event.message);
   const keyBudgetFailure = /API key budget exceeded/i.test(event.message);
-  await publishSessionFailure({
+  const failure = {
     context,
-    octokit: githubAdapter(context.installationId).octokit,
     message: keyBudgetFailure
       ? "Review stopped because AI Gateway rejected the request at the API key’s spending limit. Investigate review usage before retrying. Account credit and the key’s configured budget are separate. No merge clearance was issued."
       : creditFailure
       ? "Review stopped because AI Gateway rejected the request for insufficient credit. Restore Gateway credit, then request a full review. No merge clearance was issued."
       : "Review execution failed after runtime retries. Inspect the deployment logs, repair the failure, then request a full review. No merge clearance was issued.",
-  });
+  };
+  if (lifecycleConfigured()) { await stageLifecyclePublication(context, "failure", failure, classifyReviewInterruption(event.code, event.message)); return; }
+  await publishSessionFailure({ ...failure, octokit: githubAdapter(context.installationId).octokit });
 }

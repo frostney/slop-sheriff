@@ -1,11 +1,12 @@
 import { defineWorkflowTool, toolOutput, type WorkflowToolContext } from "eve/tools";
 import { createHook, FatalError, getWorkflowMetadata } from "workflow";
 import { orchestrateReview, reviewWorkflowInputSchema, type ReviewOrchestrationPlan } from "../../src/review/orchestration";
-import { reviewOrchestrationPlan, verifyReviewLaneReceipt } from "../lib/review-workflow";
+import { reviewOrchestrationPlan, reusableReviewLane, verifyReviewLaneReceipt } from "../lib/review-workflow";
 import type { ReviewAxis } from "../../src/review/axes";
+import { getDurableReviewEvidenceReader } from "../lib/evidence-sandbox";
 
 export default defineWorkflowTool({
-  description: "Run the application-owned lane and scout protocol for the trusted prepared review. Starts active axes concurrently, continues explicit checkpointed incomplete lanes, and reserves sixteen dispatches per admitted lane, including its scouts and continuations. Coordinator only. Actual terminal checkpoint validation and recovery remain required after completion.",
+  description: "Run the application-owned lane and scout protocol for the trusted prepared review. Starts active axes concurrently, continues explicit checkpointed incomplete lanes, and detects repeated checkpoint work without imposing a fixed number of dispatches. Coordinator only. Actual terminal checkpoint validation and recovery remain required after completion.",
   inputSchema: reviewWorkflowInputSchema,
   async execute({ context }, ctx) {
     "use workflow";
@@ -18,11 +19,17 @@ export default defineWorkflowTool({
     return await orchestrateReview({
       plan, invocationPrefix: runId,
       call: (dispatch) => ctx.agent({ ...dispatch, target: "agent" }),
+      reuseLane: (axis, key) => reuseLane(ctx, axis, key),
       verifyLane: (raw, axis, attempt, key) => verifyLane(ctx, plan, raw, axis, attempt, key),
     });
   },
   toModelOutput: toolOutput.json,
 });
+
+async function reuseLane(ctx: WorkflowToolContext, axis: ReviewAxis, key: string) {
+  "use step";
+  return reusableReviewLane(ctx, axis, key, await getDurableReviewEvidenceReader(ctx.session.auth.current, ctx.session.id));
+}
 
 async function readPlan(ctx: WorkflowToolContext, context: string) {
   "use step";

@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SandboxSession } from "eve/sandbox";
-import definition from "../agent/sandbox";
-import { bootstrapCommand, httpsAptSourcesCommand, persistReviewPathCommand, planReviewEnvironment, prepareReviewEnvironment, prepareReviewerBrowser, selectNodeVersion } from "../src/review/environment-setup";
+import { bootstrapCommand, bootstrapReviewEnvironment, httpsAptSourcesCommand, persistReviewPathCommand, planReviewEnvironment, prepareReviewEnvironment, prepareReviewerBrowser, selectNodeVersion } from "../src/review/environment-setup";
+import { acquisitionNetworkPolicy } from "../src/review/sandbox-acquisition";
+import { beginAcquisitionCommand, exportAcquisitionCommand } from "../src/review/environment-acquisition";
 import { reviewNetworkPolicy } from "../src/github/review-workspace";
 import { discoverabilityApplies } from "../src/review/discoverability";
 
@@ -32,9 +33,9 @@ describe("review environment setup", () => {
         return { exitCode: 17, stdout: "", stderr: "registry unavailable" };
       },
     }) as unknown as SandboxSession;
-    await expect(definition.bootstrap!({ use })).rejects.toThrow("bootstrap failed (exit 17)");
+    await expect(bootstrapReviewEnvironment(await use())).rejects.toThrow("bootstrap failed (exit 17)");
     expect(command).toBe(bootstrapCommand);
-    await expect(definition.bootstrap!({ use: async () => ({ run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) }) as unknown as SandboxSession })).resolves.toBeUndefined();
+    await expect(bootstrapReviewEnvironment({ run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) })).resolves.toBeUndefined();
   });
 
   test("Bun 1.4.2, Node 24 and locked dependencies are installed before browser setup", () => {
@@ -161,10 +162,11 @@ describe("review environment setup", () => {
   });
 
   test("package policy is credential-free and denies supported private network ranges", () => {
-    expect(reviewNetworkPolicy).toMatchObject({ subnets: { deny: expect.arrayContaining(["127.0.0.0/8", "10.0.0.0/8", "169.254.0.0/16"]) } });
-    expect(JSON.stringify(reviewNetworkPolicy)).not.toContain("transform");
-    expect(JSON.stringify(reviewNetworkPolicy)).toContain("registry.npmjs.org");
-    expect(JSON.stringify(reviewNetworkPolicy)).toContain("googlechromelabs.github.io");
+    expect(reviewNetworkPolicy).toBe("deny-all");
+    expect(acquisitionNetworkPolicy).toMatchObject({ subnets: { deny: expect.arrayContaining(["127.0.0.0/8", "10.0.0.0/8", "169.254.0.0/16"]) } });
+    expect(JSON.stringify(acquisitionNetworkPolicy)).not.toContain("transform");
+    expect(JSON.stringify(acquisitionNetworkPolicy)).toContain("registry.npmjs.org");
+    expect(JSON.stringify(acquisitionNetworkPolicy)).toContain("googlechromelabs.github.io");
   });
 
   test("a failing installer produces no success receipt or later inventory", async () => {
@@ -172,6 +174,9 @@ describe("review environment setup", () => {
     const manifest = JSON.stringify({ packageManager: "bun@1.4.2", engines: { node: "24.x" } });
     await expect(prepareReviewEnvironment({
       readTextFile: async () => null,
+      writeBinaryFile: async () => {},
+      readBinaryFile: async () => null,
+      setNetworkPolicy: async (policy) => { expect(policy).toBe("deny-all"); },
       run: async ({ command }) => {
         commands.push(command);
         if (command.endsWith("node --version")) return { exitCode: 0, stdout: "v24.18.0", stderr: "" };
@@ -180,7 +185,10 @@ describe("review environment setup", () => {
         if (command.includes("bun install --frozen-lockfile")) return { exitCode: 1, stdout: "", stderr: "Private package requires authorization" };
         return { exitCode: 0, stdout: "", stderr: "" };
       },
-    }, { baseSha: "a".repeat(40), headSha: "b".repeat(40), patchFingerprint: "c".repeat(64) }))
+    }, { baseSha: "a".repeat(40), headSha: "b".repeat(40), patchFingerprint: "c".repeat(64) }, undefined, async () => ({ session: {
+      run: async ({ command }: { command: string }) => ({ exitCode: 0, stdout: command.startsWith("split ") ? "7" : command.endsWith("node --version") ? "v24.18.0" : "", stderr: "" }),
+      writeTextFile: async () => {}, readBinaryFile: async () => Buffer.from("fixture"),
+    } as unknown as SandboxSession, delete: async () => {} })))
       .rejects.toThrow("repository-dependencies (exit 1)");
     expect(commands.at(-1)).toContain("bun install --frozen-lockfile");
   });
@@ -195,6 +203,17 @@ describe("review environment setup", () => {
       const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       return { stdout, stderr, exitCode };
     }
+    const acquisitionRoot = await mkdtemp(join(tmpdir(), "review-acquire-"));
+    const acquisitionFactory = async () => ({ session: {
+      run: async ({ command }: { command: string }) => {
+        if (command.startsWith("split ")) return { exitCode: 0, stdout: "7", stderr: "" };
+        if ([bootstrapCommand, beginAcquisitionCommand, exportAcquisitionCommand].includes(command)) return { exitCode: 0, stdout: "", stderr: "" };
+        return run(command.replaceAll("/workspace", acquisitionRoot));
+      },
+      writeTextFile: async ({ path, content }: { path: string; content: string }) => { await mkdir(join(acquisitionRoot, path, ".."), { recursive: true }); await writeFile(join(acquisitionRoot, path), content); },
+      readBinaryFile: async () => Buffer.from("fixture"),
+    } as unknown as SandboxSession, delete: async () => {} });
+    const destination = { run: ({ command }: { command: string }) => (command.includes("sudo tar -C /") || command.startsWith("rm -f") || command.startsWith("cat ")) ? Promise.resolve({ exitCode: 0, stdout: "", stderr: "" }) : run(command), readTextFile: async () => null, readBinaryFile: async () => null, writeBinaryFile: async () => {}, setNetworkPolicy: async (policy: unknown) => { expect(policy).toBe("deny-all"); } };
     try {
       await writeFile(join(root, "package.json"), JSON.stringify({ name: "offline-setup-fixture", packageManager: `bun@${Bun.version}`, engines: { node: ">=18" }, dependencies: { "local-fixture": "file:./dependency" }, scripts: { postinstall: `node -e 'const fs = require("fs"); if (fs.existsSync("mutate-marker")) fs.writeFileSync("app.js", "mutated");'` } }));
       await writeFile(join(root, "app.js"), "export const original = true;\n");
@@ -205,16 +224,16 @@ describe("review environment setup", () => {
       expect((await run("bun install --lockfile-only")).exitCode).toBe(0);
       expect((await run("git init -q && git -c user.name=Fixture -c user.email=fixture@example.test add package.json bun.lock dependency app.js && git -c user.name=Fixture -c user.email=fixture@example.test commit -qm fixture")).exitCode).toBe(0);
       const headSha = (await run("git rev-parse HEAD")).stdout.trim();
-      const setup = await prepareReviewEnvironment({ run: ({ command }) => run(command), readTextFile: async () => null }, { baseSha: headSha, headSha, patchFingerprint: "c".repeat(64) });
+      const setup = await prepareReviewEnvironment(destination, { baseSha: headSha, headSha, patchFingerprint: "c".repeat(64) }, undefined, acquisitionFactory);
       expect(setup.headSha).toBe(headSha);
       expect(setup.inputsDigest).toMatch(/^[a-f0-9]{64}$/);
       expect(setup.tools).toContainEqual({ name: "bun", version: Bun.version });
       expect(setup.completedSteps).toContain("repository-dependencies");
       expect((await run("bun -e 'if (require(\"local-fixture\") !== 42) process.exit(1)' ")).exitCode).toBe(0);
       await writeFile(join(root, "mutate-marker"), "");
-      await expect(prepareReviewEnvironment({ run: ({ command }) => run(command), readTextFile: async () => null }, { baseSha: headSha, headSha, patchFingerprint: "c".repeat(64) }))
+      await expect(prepareReviewEnvironment(destination, { baseSha: headSha, headSha, patchFingerprint: "c".repeat(64) }, undefined, acquisitionFactory))
         .rejects.toThrow("changed the checkout");
       expect(await readFile(join(root, "app.js"), "utf8")).toBe("mutated");
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { await rm(root, { recursive: true, force: true }); await rm(acquisitionRoot, { recursive: true, force: true }); }
   });
 });

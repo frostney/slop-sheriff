@@ -1,3 +1,12 @@
+import { retireLegacyReviewChecks } from "../../src/lifecycle/legacy-checks";
+import { lifecycleJobSchema } from "../../src/lifecycle/contracts";
+import { reconcileNativeWorker } from "../../src/lifecycle/native-worker";
+import { recoverInterruptedReview } from "../lib/recover-interrupted-review";
+import { classifyReviewInterruption } from "../../src/lifecycle/prerequisites";
+import { cancelDurableReview, reconcileDurableReview } from "../lib/reconcile-review-worker";
+import { activateReview, finishReview, inspectReview, lifecycleConfigured, lifecycleRequest } from "../../src/lifecycle/client";
+import { admitReviewWebhook, authenticatedLifecycleRequest, verifiedLifecycleReplay } from "../../src/lifecycle/webhook";
+import { retryableLifecycleError } from "../../src/lifecycle/contracts";
 import { handleReviewSessionFailure } from "../lib/session-failure";
 import { reviewPolicyDigest } from "../../src/config/review-policy-identity";
 import { validateFindingPresentation } from "../../src/github/review-presentation";
@@ -408,6 +417,9 @@ async function dispatchReview(input: {
   if (!pullRequestNumber) return null;
   const pullRequest = await fetchPullRequest(input.ctx, pullRequestNumber);
   const repositoryDetails = await fetchRepositoryDetails(input.ctx);
+  if (lifecycleConfigured() && (!input.manualFull || input.manualFullAuthorized)) {
+    await activateReview({ deliveryId: input.ctx.delivery.id, headSha: pullRequest.head.sha, repositoryId: repositoryDetails.repositoryId });
+  }
 
   if (input.action === "opened" && pullRequest.draft) return null;
 
@@ -561,6 +573,10 @@ async function dispatchReview(input: {
     skippedAxes,
   });
 
+  if (lifecycleConfigured()) await retireLegacyReviewChecks({ context, octokit,
+    ...(state.kind === "valid" && state.state.currentHead ? { previousHead: state.state.currentHead } : {}),
+  });
+
   const status = dispatch.plan.kind === "full" && dispatch.plan.delaySeconds === 600 ? "debouncing" : "running";
   const previousState = state.kind === "valid" ? state.state : pendingReviewState({
     publication: reviewConfig, pullRequest: pullRequestNumber, status,
@@ -663,6 +679,7 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
         commentId: comment.id, baseSha: pullRequest.base.sha, headSha: pullRequest.head.sha, state: state.state });
       const context = publicationContext(ctx, pullRequestNumber, pullRequest.base.sha, pullRequest.head.sha,
         repository.repositoryId, repository.repositoryCreatedAt, effectivePatchFingerprint(patchFiles));
+      await activateReview(context);
       await publishReview({ config: parseReviewConfig(source), report,
         octokit: githubAdapter(context.installationId).octokit, context,
       });
@@ -680,6 +697,24 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
       await ctx.thread.post(
         "Continuing or stopping a review requires write, maintain, or admin repository permission.",
       );
+      return null;
+    }
+    if (lifecycleConfigured()) {
+      const repository = await fetchRepositoryDetails(ctx);
+      const pullRequest = ctx.conversation.pullRequestNumber;
+      if (!pullRequest) return null;
+      const owner = lifecycleJobSchema.nullable().parse(await lifecycleRequest("owner", { repositoryId: repository.repositoryId, pullRequest }));
+      if (!owner) { await ctx.thread.post("This legacy review has no durable execution record. Request a new full review to admit it into durable recovery."); return null; }
+      if (control === "stop") {
+        await lifecycleRequest("stop", { attemptId: owner.attemptId });
+        await ctx.thread.post("The current review attempt is stopped. Its native workers and exact attempt Checks are being retired.");
+      } else if (owner.status === "interrupted") {
+        const recovered = await recoverInterruptedReview(owner);
+        await ctx.thread.post(recovered ? "Verified prerequisites and saved evidence allow this review to resume through the repository queue." : "The review remains interrupted while its prerequisites or verified recovery evidence are unavailable. No model work was restarted.");
+      } else {
+        if (owner.sessionId && owner.status === "running") await reconcileNativeWorker(owner.sessionId);
+        await ctx.thread.post(owner.status === "complete" ? "The current review is already published." : "The durable lifecycle is reconciling this review and its pending publication.");
+      }
       return null;
     }
     if (control === "stop") return { auth: defaultGitHubAuth(ctx) };
@@ -778,12 +813,21 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
 const { credentials: githubCredentials, api: githubApi } = connectedGitHubChannel(githubConnector);
 const channel = githubChannel({
   botName: "slop-sheriff",
-  credentials: githubCredentials,
+  credentials: { ...githubCredentials, webhookVerifier: async (request, body) => {
+    if (request.headers.has("x-review-attempt")) return verifiedLifecycleReplay(request, body);
+    return githubCredentials.webhookVerifier?.(request, body);
+  } },
   api: githubApi,
   turnPolicy: "steer",
   progress: { reactions: false },
-  onPullRequest,
-  onComment,
+  onPullRequest: async (ctx, event) => {
+    try { const result = await onPullRequest(ctx, event); if (!result) await finishReview(ctx.delivery.id, "complete"); return result; }
+    catch (error) { await finishReview(ctx.delivery.id, retryableLifecycleError(error) ? "retry" : "interrupted", "admission_failed", classifyReviewInterruption("admission_failed", error instanceof Error ? error.message : "")); throw error; }
+  },
+  onComment: async (ctx, event) => {
+    try { const result = await onComment(ctx, event); if (!result) await finishReview(ctx.delivery.id, "complete"); return result; }
+    catch (error) { await finishReview(ctx.delivery.id, retryableLifecycleError(error) ? "retry" : "interrupted", "admission_failed", classifyReviewInterruption("admission_failed", error instanceof Error ? error.message : "")); throw error; }
+  },
   events: {
     // Check Runs, the result summary, and inline finding threads are the
     // product surface. Suppress the ordinary model reply so one turn cannot
@@ -806,7 +850,25 @@ if (!verifier) {
 
 export default {
   ...channel,
-  routes: channel.routes.map((route) =>
+  routes: [{
+    method: "POST" as const, path: "/eve/v1/review-lifecycle",
+    handler: async (request: Request, context: Parameters<typeof githubRoute.handler>[1]) => {
+      if (!authenticatedLifecycleRequest(request)) return new Response("unauthorized", { status: 401 });
+      const attemptId = request.headers.get("x-review-attempt");
+      const operation = request.headers.get("x-review-operation");
+      const job = attemptId ? await inspectReview(attemptId, (operation === "cancel" || operation === "recover")) : null;
+      if (job && operation === "recover") return Response.json({ recovered: await recoverInterruptedReview(job, context) });
+      if (job && operation === "cancel") { await cancelDurableReview(job, context); return Response.json({ cancelled: true }); }
+      if (job && operation === "reconcile") { await reconcileDurableReview(job, context); return Response.json({ reconciled: true }); }
+      if (!job || !await verifiedLifecycleReplay(request, await request.clone().text())) return new Response("stale dispatch", { status: 409 });
+      // Immutable session cancellation includes owned child tasks before replacement dispatch.
+      if (job.sessionId) {
+        await context.attachSession(job.sessionId).cancel({ tasks: true });
+        await context.attachSession(job.sessionId).reset({ reason: "durable review worker recovery" });
+      }
+      return githubRoute.handler(request, { ...context, from: withFreshReviewSessions(context.from, context.resolveSession) });
+    },
+  }, ...channel.routes.map((route) =>
     route === githubRoute
       ? {
           ...githubRoute,
@@ -814,6 +876,7 @@ export default {
             request: Request,
             context: Parameters<typeof githubRoute.handler>[1],
           ) =>
+            (await admitReviewWebhook(request, verifier)) ??
             (await handleGitHubLifecycleWebhook({
               request,
               verifier,
@@ -827,11 +890,11 @@ export default {
             })) ??
             githubRoute.handler(request, {
               ...context,
-              from: withFreshReviewSessions(context.from),
+              from: withFreshReviewSessions(context.from, context.resolveSession),
             }),
         }
       : route,
-  ),
+  )],
 };
 
 /** Revalidate legacy overlong findings once so an untouched baseline cannot block delivery. */

@@ -57,12 +57,12 @@ flowchart TD
   A publication-only continuation retries GitHub directly without a model or
   completed review work.
 
-One GitHub summary comment holds the authoritative versioned review state and
+One GitHub summary comment holds the published versioned review state and
 complete v2 findings artifact. Large state is compressed and, when needed, split
-into immutable attachments saved before the summary pointer changes. Convex stores advisory,
-repository-scoped cross-PR memory
-through `@convex-dev/rag`; it never owns the current verdict, baseline, or
-finding status. Recent matches remain individual while older matches collapse
+into immutable attachments saved before the summary pointer changes. Dedicated
+Convex ledgers own admission, execution recovery, signed evidence, publication
+outboxes and cost accounting. Separate cross-PR memory through `@convex-dev/rag`
+is advisory; it cannot change the verdict, baseline or finding status. Recent matches remain individual while older matches collapse
 to bounded semantic-cluster representatives after the repository has enough
 review history. The GitHub state allows the next webhook to distinguish the
 first review, an exact delta, a semantic no-op, and a lost baseline.

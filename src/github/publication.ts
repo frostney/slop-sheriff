@@ -1,3 +1,6 @@
+import { classifyReviewInterruption } from "../lifecycle/prerequisites";
+import { fencePublicationWrites } from "../lifecycle/publication-fence";
+import { assertReviewOwnership, lifecycleConfigured, stageLifecyclePublication } from "../lifecycle/client";
 import type { Octokit } from "@octokit/rest";
 import { isReviewBotComment } from "./comment-identity";
 import { renderPlainText } from "./deterministic-presentation";
@@ -344,6 +347,8 @@ export async function publishInProgressCheck(input: {
   readonly activeAxes?: readonly ReviewAxis[];
   readonly skippedAxes?: readonly ReviewAxis[];
 }): Promise<string> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
+  await assertReviewOwnership(input.context);
   const existing = await latestCheck(input.octokit, input.context);
   const common = {
     owner: input.context.owner,
@@ -438,7 +443,7 @@ async function upsertAxisCheck(input: {
   await input.octokit.rest.checks.create({
     ...common,
     head_sha: input.context.headSha,
-    external_id: `${name}:${input.context.pullRequest}:${input.context.headSha}`,
+    external_id: `${name}:${input.context.pullRequest}:${input.context.headSha}${input.context.deliveryId ? `:${input.context.deliveryId}` : ""}`,
   });
 }
 
@@ -449,6 +454,8 @@ export async function publishAxisCheckpoint(input: {
   readonly octokit: OctokitClient;
   readonly status: "complete" | "in-progress";
 }): Promise<void> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
+  await assertReviewOwnership(input.context);
   await upsertAxisCheck({
     config: input.config,
     axis: input.axis,
@@ -971,6 +978,8 @@ export async function writeReviewState(
   context: TrustedGitHubContext,
   state: ReviewState,
 ): Promise<void> {
+  octokit = fencePublicationWrites(octokit, context);
+  await assertReviewOwnership(context);
   if (state.pullRequest !== context.pullRequest) throw new Error("Review state belongs to another pull request");
   const { body, parts } = prepareReviewStateComments(state);
   const comments = await octokit.paginate(octokit.rest.issues.listComments, {
@@ -1088,9 +1097,12 @@ export function pendingPublicationRetry(
 export async function stageReviewPublication(input: {
   readonly context: TrustedGitHubContext;
   readonly identity: ReportAssemblyIdentity;
+  readonly durableDelivery?: boolean;
+  readonly config?: ReviewConfig;
   readonly octokit: OctokitClient;
   readonly report: ReviewReport;
 }): Promise<ReviewState> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
   const identity = validateReportPublicationIdentity(
     input.context,
     input.identity,
@@ -1103,7 +1115,8 @@ export async function stageReviewPublication(input: {
   ) {
     throw new Error("Pending review report does not match its trusted identity");
   }
-  const current = await readLatestReviewState(input.octokit, input.context);
+  await stageLifecyclePublication(input.context, "report", { context: input.context, report, config: input.config, identity });
+  const current = lifecycleConfigured() && !input.durableDelivery ? null : await readLatestReviewState(input.octokit, input.context);
   const next: ReviewState = {
     ...(current ?? {
       schemaVersion: 2 as const,
@@ -1122,6 +1135,7 @@ export async function stageReviewPublication(input: {
     updatedAt: new Date().toISOString(),
   };
   findingPublicationMetadata(report, next, input.context);
+  if (lifecycleConfigured() && !input.durableDelivery) return next;
   await writeReviewState(input.octokit, input.context, next);
   return next;
 }
@@ -1146,6 +1160,8 @@ export async function writeReviewFailureState(input: {
   readonly failure: ReviewFailureEnvelope;
   readonly octokit: OctokitClient;
 }): Promise<void> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
+  await assertReviewOwnership(input.context);
   if (
     !input.context.patchFingerprint ||
     input.failure.baseSha !== input.context.baseSha ||
@@ -1189,6 +1205,7 @@ async function verifyPublicationHead(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
 ): Promise<void> {
+  await assertReviewOwnership(context);
   const { data: current } = await octokit.rest.pulls.get({
     owner: context.owner,
     repo: context.repo,
@@ -1207,8 +1224,10 @@ export async function publishReview(input: {
   readonly context: TrustedGitHubContext;
   readonly octokit: OctokitClient;
   readonly reconcileFindings?: boolean;
+  readonly durableDelivery?: boolean;
   readonly report: ReviewReport;
 }): Promise<{ readonly checkUrl: string; readonly findingCount: number }> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
   validateFindingPresentation(input.report);
   if (input.report.coverage.unreached.length > 0) {
     throw new ReviewReportValidationError([{ code: "custom", path: ["coverage", "unreached"] }], "Required review coverage is incomplete; publication cannot certify this revision");
@@ -1225,6 +1244,10 @@ export async function publishReview(input: {
     throw new Error("Trusted review context is missing patch identity");
   }
   const patchFingerprint = input.context.patchFingerprint;
+  if (lifecycleConfigured() && !input.durableDelivery) {
+    await stageLifecyclePublication(input.context, "report", { context: input.context, report: input.report, config: input.config });
+    return { checkUrl: `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`, findingCount: input.report.findings.length };
+  }
   await verifyPublicationHead(input.octokit, input.context);
   const config = input.config ?? { blocking: false, profile: "balanced" as const };
   const changed = await input.octokit.paginate(
@@ -1319,8 +1342,15 @@ export async function publishReview(input: {
 export async function publishFailClosedCheck(input: {
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly message: string;
+  readonly durableDelivery?: boolean;
   readonly octokit: OctokitClient;
 }): Promise<string> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
+  await assertReviewOwnership(input.context);
+  if (lifecycleConfigured() && !input.durableDelivery) {
+    await stageLifecyclePublication(input.context, "failure", { context: input.context, message: input.message });
+    return `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`;
+  }
   await failRunningAxisChecks(input.octokit, input.context, input.message);
   const existing = await latestCheck(input.octokit, input.context);
   if (existing?.conclusion === "action_required") {
@@ -1373,6 +1403,12 @@ export async function publishBudgetExhaustedCheck(input: {
   readonly limit: number;
   readonly octokit: OctokitClient;
 }): Promise<string> {
+  if (lifecycleConfigured()) {
+    await stageLifecyclePublication(input.context, "failure", { context: input.context, message: `The ${input.reviewAxis} lane reached its native session ${input.budgetAxis} quota before completion. Verified checkpoints are retained; the durable recovery worker resumes unfinished evidence without changing execution limits.` }, classifyReviewInterruption("SESSION_TOKEN_LIMIT_REACHED", ""));
+    return `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`;
+  }
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
+  await assertReviewOwnership(input.context);
   await failRunningAxisChecks(
     input.octokit,
     input.context,
@@ -1426,6 +1462,8 @@ export async function publishSessionFailure(input: {
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<void> {
+  input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
+  await assertReviewOwnership(input.context);
   const { context, octokit } = input;
   if (!context.deliveryId) return;
   const { data: pr } = await octokit.rest.pulls.get({ owner: context.owner, repo: context.repo, pull_number: context.pullRequest });
@@ -1440,5 +1478,5 @@ export async function publishSessionFailure(input: {
       updatedAt: new Date().toISOString(),
     });
   }
-  await publishFailClosedCheck(input);
+  await publishFailClosedCheck({ ...input, durableDelivery: true });
 }

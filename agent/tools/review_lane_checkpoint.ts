@@ -19,6 +19,7 @@ import {
 import {
   readReviewEvidenceManifest,
   readReviewEvidenceProgress,
+  type ReviewEvidenceProgress,
 } from "../../src/review/evidence-bundle";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { reviewConfigFromAuth } from "../../src/config/trusted-review-config";
@@ -31,12 +32,14 @@ function checkpointAttestation(
   ctx: Pick<SessionContext, "session">,
   checkpoint: LaneCheckpoint | null,
   operation: "read" | "write",
+  evidenceProgress?: ReviewEvidenceProgress,
 ): string | null {
   const parent = ctx.session.parent;
   const route = reviewRouteState.get();
   if (!checkpoint || !parent || route?.role !== "lane" || route.axis !== checkpoint.axis) return null;
   return attestCheckpoint({
     checkpoint,
+    ...(evidenceProgress ? { evidenceProgress } : {}),
     rootSessionId: parent.rootSessionId,
     invocationId: parent.callId,
     attempt: route.attempt,
@@ -138,7 +141,7 @@ export default defineTool({
     return {
       operation: "write" as const,
       checkpoint,
-      attestation: checkpointAttestation(ctx, checkpoint, "write"),
+      attestation: checkpointAttestation(ctx, checkpoint, "write", progress),
     };
   },
   toModelOutput(output) {

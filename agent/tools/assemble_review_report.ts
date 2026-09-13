@@ -1,3 +1,5 @@
+import { parseReviewConfig } from "../../src/config/review-config";
+import { routingAttribute } from "../../src/models/routing";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineTool, toolOutput } from "eve/tools";
 import { githubAdapter } from "../../src/github/chat-adapter";
@@ -99,6 +101,7 @@ export default defineTool({
       latest = assembled;
       reviewReportState.update(() => assembled);
       await stageReviewPublication({
+        config: parseReviewConfig(String(ctx.session.auth.current?.attributes[routingAttribute] ?? "")),
         context: trusted,
         identity: assembled.identity,
         octokit,
