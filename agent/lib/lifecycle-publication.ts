@@ -6,7 +6,7 @@ import type { LifecycleJob } from "../../src/lifecycle/contracts";
 import { trustedGitHubContextSchema } from "../../src/github/trusted-context";
 import { reviewReportSchema } from "../../src/review/findings";
 import { githubAdapter } from "../../src/github/chat-adapter";
-import { publishReview, publishFailClosedCheck, stageReviewPublication } from "../../src/github/publication";
+import { publishReview, publishSessionFailure, stageReviewPublication } from "../../src/github/publication";
 import { parseReviewConfig } from "../../src/config/review-config";
 
 export async function deliverLifecyclePublication(job: LifecycleJob): Promise<void> {
@@ -19,7 +19,7 @@ export async function deliverLifecyclePublication(job: LifecycleJob): Promise<vo
   if (repository.data.node_id !== job.repositoryId) throw new Error("Publication repository identity changed");
   if (job.publicationKind === "failure") {
     const payload = z.object({ context: trustedGitHubContextSchema, message: z.string() }).parse(raw);
-    await publishFailClosedCheck({ ...payload, durableDelivery: true, octokit: githubAdapter(payload.context.installationId).octokit });
+    await publishSessionFailure({ ...payload, durableDelivery: true, octokit: githubAdapter(payload.context.installationId).octokit });
     return;
   }
   const payload = z.object({ context: trustedGitHubContextSchema, report: reviewReportSchema, identity: reportAssemblyIdentitySchema.optional(), configSource: z.string().optional(), config: z.record(z.string(), z.unknown()).optional() }).parse(raw);

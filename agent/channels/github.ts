@@ -575,6 +575,7 @@ async function dispatchReview(input: {
 
   if (lifecycleConfigured()) await retireLegacyReviewChecks({ context, octokit,
     ...(state.kind === "valid" && state.state.currentHead ? { previousHead: state.state.currentHead } : {}),
+    discoverLegacyHeads: state.kind !== "valid" || !state.state.legacyChecksMigrated,
   });
 
   const status = dispatch.plan.kind === "full" && dispatch.plan.delaySeconds === 600 ? "debouncing" : "running";
@@ -583,6 +584,7 @@ async function dispatchReview(input: {
   });
   await writeReviewState(octokit, context, {
     ...beginCurrentHeadReview(previousState, pullRequest.head.sha, status), publication: reviewConfig,
+    ...(lifecycleConfigured() ? { legacyChecksMigrated: true } : {}),
   });
 
   const priorFindings =

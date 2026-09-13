@@ -17,6 +17,7 @@ export const reviewStateSchema = z.object({
   app: z.literal("known-good-review"),
   pullRequest: z.number().int().positive(),
   currentHead: z.string().min(1).optional(),
+  legacyChecksMigrated: z.boolean().optional(),
   initialFullStatus: z.enum([
     "never",
     "debouncing",
@@ -65,7 +66,7 @@ const partMarker = "known-good-review:state-part:v1";
 const attachmentLabel = "Review state attachment.";
 
 function visibleState(parsed: ReviewState): string {
-  return parsed.failure
+  return parsed.failure || parsed.initialFullStatus === "failed"
     ? reviewProgressBody("failed", parsed.publication?.personality)
     : parsed.pendingPublication ? reviewProgressBody("running", parsed.publication?.personality)
     : parsed.currentHead && parsed.baseline && parsed.currentHead !== parsed.baseline.head && parsed.initialFullStatus === "completed"
