@@ -32,7 +32,7 @@ test("accepted signed admission persists bounded native transport before any fal
   } finally { fetch.mockRestore(); }
 }));
 
-test("admission outage reaches webhook sender as503 instead of Eve swallowing accepted work", async () => withService(async () => {
+test("admission outage reaches webhook sender as 503 instead of Eve swallowing accepted work", async () => withService(async () => {
   const fetch = spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network unavailable"));
   try { expect((await admitReviewWebhook(request(), async () => true))?.status).toBe(503); }
   finally { fetch.mockRestore(); }

@@ -57,3 +57,16 @@ the complete metadata and integrity hashes. Fresh lane contexts follow evidence
 or investigation needs rather than a fixed model-step count.
 
 Gateway authentication/payment admission rejections are recorded from the installed provider's typed errors, with generation IDs preserved even on thrown failures. The authenticated `/cost/nonbillable-attempt` endpoint checks the complete paginated attempt: at least one recorded failed request, explicit rejection classification for every request, no generation IDs and no positive recorded usage. Absent or unfinished telemetry never proves zero work. Recovery uses this narrow proof for a saved admission-only receipt; accounting still leaves unreconciled billing quantities explicitly unknown. Paid full/delta continuations triggered by review control responses retain their review accounting identity.
+
+Stream validation rejects an impossible JSON prefix or a root property forbidden
+by the actual model-facing tool schema before forwarding more generated input.
+This is a contract check, not a token or duration limit. Valid long inputs remain
+eligible. Failure cancels the upstream stream while retaining its billing identity.
+
+After verifying an increase or reset for the affected Gateway key, a repository
+writer can post `@slop-sheriff key budget repaired`. This explicit confirmation
+allows same-key prerequisite verification; it does not change the allowance.
+Credit/authentication checks, native descendant fencing and signed checkpoint
+validation still apply. Ordinary `@slop-sheriff continue` uses the same native
+recovery route but cannot treat a positive account balance as key-budget repair.
+Automatic recovery never supplies the operator confirmation itself.

@@ -10,7 +10,7 @@ import { probeReviewPrerequisite, reviewInterruptionSchema } from "../../src/lif
 import { artifactEligibility } from "../../src/review/durable-evidence";
 import { recoveryPolicy } from "../../src/lifecycle/recovery-policy";
 
-export async function recoverInterruptedReview(job: LifecycleJob, nativeContext?: Pick<RouteHandlerArgs, "resolveSession" | "attachSession">): Promise<boolean> {
+export async function recoverInterruptedReview(job: LifecycleJob, nativeContext?: Pick<RouteHandlerArgs, "resolveSession" | "attachSession">, keyBudgetRepairConfirmed = false): Promise<boolean> {
   const deliveryOnly = !!job.publication && (job.publicationKind === "report" || job.failureCode === "publication_failed");
   const rawInterruption = deliveryOnly ? job.publicationInterruption ?? job.interruption : job.interruption;
   if (!rawInterruption) return false;
@@ -31,7 +31,7 @@ export async function recoverInterruptedReview(job: LifecycleJob, nativeContext?
     if (interruption.kind !== "github-authentication" && interruption.kind === "deterministic" && interruption.deployment === (process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "local")) return false;
     return z.boolean().parse(await lifecycleRequest("recover", { attemptId: job.attemptId, prerequisiteReady: true, evidenceEligible: false }));
   }
-  const prerequisite = await probeReviewPrerequisite(interruption);
+  const prerequisite = await probeReviewPrerequisite(interruption, { keyBudgetRepairConfirmed });
   if (!prerequisite.ready) return false;
   // An existing native session needs cryptographically verified, exact-scope evidence.
   // A pre-session admission has no paid analysis to repeat and may safely retry.
@@ -66,10 +66,20 @@ export async function recoverInterruptedReview(job: LifecycleJob, nativeContext?
 export async function recoverInterruptedReviews(): Promise<void> {
   const jobs = lifecycleJobSchema.array().parse(await lifecycleRequest("claimInterruptions", {}));
   const results = await Promise.allSettled(jobs.map(async job => {
-    const host = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-    if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error("Lifecycle recovery requires production origin");
-    const response = await fetch(`https://${host}/eve/v1/review-lifecycle`, { method: "POST", headers: { authorization: `Bearer ${process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN ?? ""}`, "x-review-attempt": job.attemptId, "x-review-operation": "recover" }, signal: AbortSignal.timeout(60_000), redirect: "error" });
-    if (!response.ok) throw new Error("Lifecycle recovery probe unavailable");
+    await requestInterruptedReviewRecovery(job.attemptId);
   }));
   for (const result of results) if (result.status === "rejected") console.error("Review prerequisite recovery remains interrupted", result.reason instanceof Error ? result.reason.name : "unknown");
+}
+
+/** Enter the native route so recovery can fence and inspect retained descendants. */
+export async function requestInterruptedReviewRecovery(attemptId: string, keyBudgetRepairConfirmed = false): Promise<boolean> {
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error("Lifecycle recovery requires production origin");
+  const response = await fetch(`https://${host}/eve/v1/review-lifecycle`, { method: "POST", headers: {
+    authorization: `Bearer ${process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN ?? ""}`,
+    "x-review-attempt": attemptId, "x-review-operation": "recover",
+    ...(keyBudgetRepairConfirmed ? { "x-review-key-budget-repaired": "true" } : {}),
+  }, signal: AbortSignal.timeout(60_000), redirect: "error" });
+  if (!response.ok) throw new Error("Lifecycle recovery probe unavailable");
+  return z.object({ recovered: z.boolean() }).parse(await response.json()).recovered;
 }

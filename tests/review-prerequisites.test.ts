@@ -36,3 +36,12 @@ test.each([{ creditStatus: 401 }, { creditStatus: 503 }, { modelStatus: 500 }, {
   expect((await probeReviewPrerequisite({ ...base, kind: "credit" }, { gateway: probe.provider })).ready).toBe(false);
   expect(probe.requests.every(request => request.startsWith("GET "))).toBe(true);
 });
+
+test("explicit key repair confirmation enables same-key recovery but still verifies credit and authentication", async () => {
+  const probe = gateway({ balance: "10" });
+  expect((await probeReviewPrerequisite({ ...base, kind: "key-budget" }, { gateway: probe.provider, currentCredentialFingerprint: "key-a", keyBudgetRepairConfirmed: true })).ready).toBe(true);
+  expect(probe.requests.every(request => request.startsWith("GET "))).toBe(true);
+  const empty = gateway({ balance: "0" });
+  expect((await probeReviewPrerequisite({ ...base, kind: "key-budget" }, { gateway: empty.provider, keyBudgetRepairConfirmed: true })).ready).toBe(false);
+  expect((await probeReviewPrerequisite({ ...base, kind: "deterministic" }, { gateway: probe.provider, currentDeployment: "deployment-a", keyBudgetRepairConfirmed: true })).ready).toBe(false);
+});

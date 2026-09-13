@@ -63,6 +63,8 @@ const turnUsage = defineState<TurnUsageState | null>(
   "known-good-review.turn-usage.v1", () => null,
 );
 
+const sandboxStopped = defineState<boolean>("slop-sheriff.sandbox-stopped.v1", () => false);
+
 const sessionLimitDetailsSchema = z.object({
   kind: z.enum(["input", "output"]),
   limit: z.number().int().positive(),
@@ -85,6 +87,17 @@ function isLifecycleOwner(ctx: {
     channelKind: ctx.channel.kind,
     hasParent: ctx.session.parent !== undefined,
   });
+}
+
+async function stopReviewSandbox(ctx: HookContext): Promise<void> {
+  if (!isLifecycleOwner(ctx) || sandboxStopped.get()) return;
+  try {
+    await (await ctx.getSandbox()).stop();
+    sandboxStopped.update(() => true);
+  } catch (error) {
+    console.error(JSON.stringify({ event: "known-good-review.sandbox.stop_failed",
+      error: error instanceof Error ? error.name : "unknown" }));
+  }
 }
 
 function executionRoute(channelKind: string | undefined): ReviewRoute {
@@ -402,6 +415,7 @@ export default defineHook({
   events: {
     "turn.started"(_event, ctx) {
       if (!isLifecycleOwner(ctx)) return;
+      sandboxStopped.update(() => false);
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
       if (plan?.kind !== "full" && plan?.kind !== "delta") return;
@@ -585,16 +599,7 @@ export default defineHook({
           );
         }
       }
-      try {
-        await (await ctx.getSandbox()).stop();
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "known-good-review.sandbox.stop_failed",
-            error: error instanceof Error ? error.name : "unknown",
-          }),
-        );
-      }
+      await stopReviewSandbox(ctx);
     },
     async "turn.completed"(event, ctx) {
       const published = finishTurnTracking(ctx, event.data.turnId, true);
@@ -637,32 +642,14 @@ export default defineHook({
           );
         }
       }
-      try {
-        await (await ctx.getSandbox()).stop();
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "known-good-review.sandbox.stop_failed",
-            error: error instanceof Error ? error.name : "unknown",
-          }),
-        );
-      }
+      await stopReviewSandbox(ctx);
     },
     async "turn.cancelled"(event, ctx) {
       finishTurnTracking(ctx, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
         return;
       }
-      try {
-        await (await ctx.getSandbox()).stop();
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "known-good-review.sandbox.stop_failed",
-            error: error instanceof Error ? error.name : "unknown",
-          }),
-        );
-      }
+      await stopReviewSandbox(ctx);
     },
     async "session.waiting"() {
       await reconcilePendingGatewayTelemetry("session.waiting");
@@ -670,7 +657,10 @@ export default defineHook({
     async "session.completed"() {
       await reconcilePendingGatewayTelemetry("session.completed");
     },
-    async "session.failed"() {
+    async "session.failed"(_event, ctx) {
+      // Fatal native step errors can skip turn.failed/turn.cancelled entirely.
+      // A durable stop receipt avoids reopening an already stopped VM here.
+      await stopReviewSandbox(ctx);
       await reconcilePendingGatewayTelemetry("session.failed");
     },
   },

@@ -52,7 +52,8 @@ describe("specialists selected from changed review needs", () => {
   });
   test("missing, truncated and unfamiliar patches widen conservatively", () => {
     const file = change("src/main.ts", "return 1;", "return 2;");
-    for (const candidate of [{ ...file, patch: null }, { ...file, additions: 2 }, { ...file, path: "custom-format" }]) {
+    const lock = change("bun.lock", "old", "new");
+    for (const candidate of [{ ...file, patch: null }, { ...file, additions: 2 }, { ...file, path: "custom-format" }, { ...lock, patch: null }, { ...lock, additions: 2 }]) {
       expect(selected(candidate)).toEqual(["deduplication", "claim-and-specification", "engineering-quality", "test-against-spec", "writing-quality", "test-health"]);
     }
   });

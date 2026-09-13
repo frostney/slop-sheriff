@@ -1,3 +1,5 @@
+import { z } from "zod";
+import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { expect, spyOn, test } from "bun:test";
 import { convexTest } from "convex-test";
 import { generateText, streamText, simulateReadableStream, APICallError } from "ai";
@@ -270,4 +272,44 @@ test("raw installed Gateway admission rejections are proof only with complete fa
     const missing = await t.query(internal.costLedgerData.nonbillableAttempt, { attemptId: "missing", paginationOpts: { numItems: 100, cursor: null } });
     expect(missing.observedCalls).toBe(0);
   }
+});
+
+// Minimized from PR43 deduplication stream, September 13. Once this prefix is
+// invalid, appending whitespace can never repair the tool input.
+test.each(["mock", "gateway"] as const)("invalid tool JSON stops upstream generation through %s and retains its billable identity", async transport => {
+  const rows: CostObservation[] = [];
+  let cancelled = false;
+  let executed = false;
+  const chunks: LanguageModelV4StreamPart[] = [
+    { type: "stream-start", warnings: [] },
+    { type: "response-metadata", id: "gen_malformed" },
+    { type: "tool-input-start", id: "broken", toolName: "bash" },
+    { type: "tool-input-delta", id: "broken", delta: '{"command":"bun test","}}]} shape invalid? extra comma. Need proper.}' },
+    { type: "tool-input-delta", id: "broken", delta: ' next "broken' },
+    { type: "tool-input-delta", id: "broken", delta: ' \r\n'.repeat(100) },
+    { type: "finish", finishReason: result.finishReason, usage: result.usage },
+  ];
+  const model = transport === "mock" ? new MockLanguageModelV4({ doStream: async () => ({ stream: new ReadableStream({
+    pull(controller) { const part = chunks.shift(); if (part) controller.enqueue(part); else controller.close(); },
+    cancel() { cancelled = true; },
+  }) }) }) : createGateway({ apiKey: "offline-test-key", fetch: Object.assign(async () => new Response(new ReadableStream({
+    pull(controller) {
+      const part = chunks.shift();
+      if (part) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(part)}\n\n`));
+      // Keep the HTTP source open so cancellation must reach it, rather than
+      // accidentally passing because the provider closed after its last chunk.
+    },
+    cancel() { cancelled = true; },
+  }), { headers: { "content-type": "text/event-stream" } }), { preconnect: () => {} }) })("fixture/model");
+  const errors: unknown[] = [];
+  const streamed = streamText({ model, prompt: "fixture", maxRetries: 0,
+    tools: { bash: { description: "fixture", inputSchema: z.object({ command: z.string() }), execute: async () => { executed = true; return "ran"; } } },
+    telemetry: { isEnabled: true, integrations: [createCostTelemetry({ scope: () => scope, record: async row => { rows.push(row); } })] },
+    onError: ({ error }) => { errors.push(error); },
+  });
+  await streamed.consumeStream({ onError: error => { errors.push(error); } });
+  expect(cancelled).toBe(true);
+  expect(executed).toBe(false);
+  expect(errors.map(String).join(" ")).toContain("Invalid streamed tool JSON");
+  expect(rows.at(-1)).toMatchObject({ generationId: "gen_malformed", outcome: "failed", sdkCostUsd: null });
 });

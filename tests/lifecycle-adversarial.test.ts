@@ -102,3 +102,31 @@ test("retained-report recovery probes GitHub only even when model credit is unav
     expect(requests).toEqual(["https://lifecycle.invalid/review-lifecycle/recover"]);
   } finally { adapter.mockRestore(); fetchSpy.mockRestore(); }
 }));
+
+test("operator recovery enters the authenticated native route and never assumes a restart", async () => {
+  const { requestInterruptedReviewRecovery } = await import("../agent/lib/recover-interrupted-review");
+  const { reviewControlResponse } = await import("../src/github/manual-full");
+  expect(reviewControlResponse("@slop-sheriff key budget repaired")).toBe("key-budget-repaired");
+  expect(reviewControlResponse("@slop-sheriff continue")).toBe("approve");
+  const originalHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  process.env.VERCEL_PROJECT_PRODUCTION_URL = "review.example";
+  const requests: Headers[] = [];
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (url, init) => {
+    expect(String(url)).toBe("https://review.example/eve/v1/review-lifecycle");
+    requests.push(new Headers(init?.headers));
+    return Response.json({ recovered: requests.length === 2 });
+  }) as typeof fetch);
+  try {
+    await withService(async () => {
+      expect(await requestInterruptedReviewRecovery("exact-attempt")).toBe(false);
+      expect(await requestInterruptedReviewRecovery("exact-attempt", true)).toBe(true);
+    });
+    expect(requests[0]!.get("x-review-key-budget-repaired")).toBeNull();
+    expect(requests[1]!.get("x-review-key-budget-repaired")).toBe("true");
+    expect(requests.every(headers => headers.get("authorization") === "Bearer offline-token" && headers.get("x-review-attempt") === "exact-attempt")).toBe(true);
+  } finally {
+    fetchSpy.mockRestore();
+    if (originalHost === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    else process.env.VERCEL_PROJECT_PRODUCTION_URL = originalHost;
+  }
+});

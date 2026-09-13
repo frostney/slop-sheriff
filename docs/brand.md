@@ -15,7 +15,7 @@ application never prepends canned greetings or jokes.
 Configure the trusted base branch's `.github/slop-sheriff.yml`:
 
 ```yaml
-voice: theatrical # C; default. Alternatives: understated (B), off.
+voice: theatrical # Default. Alternatives: understated, off.
 # Optional style guide, read only at the trusted base revision:
 voiceGuide: docs/review-voice.md
 ```
@@ -88,7 +88,9 @@ The built-in image tool generated these assets; it does not report its model
 version, so no specific model version is claimed.
 
 Exports are a 512×512 PNG App/README icon, a 1280×640 JPEG
-social preview, and an optimized WebP hero. The PNG and JPEG uploads are each
+social preview, an optimized WebP hero, and an 88×88 WebP for the landing icon.
+The web icon retains the same artwork and supports the 44px display at 2× density.
+Recreate that encoding with `cwebp -resize 88 88 -q 90 docs/assets/slop-sheriff-icon.png -o docs/assets/slop-sheriff-web-icon.webp`. The PNG and JPEG uploads are each
 under 1 MB. Regenerate the website asset bundle after changing exports with
 `bun src/landing/export-assets.ts`.
 

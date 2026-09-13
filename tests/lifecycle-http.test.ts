@@ -28,3 +28,29 @@ test("authenticated lifecycle HTTP preserves identity fences and explicit fresh-
     else process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = original;
   }
 });
+
+test("repeated failure staging reclaims displaced blobs and preserves the final report", async () => {
+  const original = process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN;
+  process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = "service-test-token";
+  try {
+    const t = convexTest(schema, modules);
+    const post = async (data: unknown) => t.fetch("/review-lifecycle/stage", { method: "POST", headers: { authorization: "Bearer service-test-token", "content-type": "application/json" }, body: JSON.stringify(data) });
+    await t.mutation(internal.reviewLifecycle.admit, { deliveryId: "blob-retry", repository: "acme/repo", repositoryId: "R_1", pullRequest: 1, headSha: "sha", eventTime: 1000, body: "{}", event: "pull_request", signature: "" });
+    const [job] = await t.mutation(internal.reviewLifecycle.claim, { capacity: 1 });
+    const attemptId = job!.attemptId;
+    const pointers: string[] = [];
+    for (const kind of ["failure", "failure", "report", "failure"] as const) {
+      expect(await (await post({ attemptId, kind, publication: JSON.stringify({ kind, sequence: pointers.length }) })).json()).toBe(true);
+      const row = await t.query(internal.reviewLifecycle.inspect, { attemptId });
+      pointers.push((JSON.parse(row!.publication!) as { storageId: string }).storageId);
+    }
+    expect(pointers[0]).not.toBe(pointers[1]);
+    expect(pointers[1]).not.toBe(pointers[2]);
+    expect(pointers[2]).toBe(pointers[3]);
+    const remaining = await t.run(ctx => ctx.db.system.query("_storage").collect());
+    expect(remaining.map(row => String(row._id))).toEqual([pointers[2]!]);
+  } finally {
+    if (original === undefined) delete process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN;
+    else process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = original;
+  }
+});

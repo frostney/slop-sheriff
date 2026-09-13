@@ -116,8 +116,9 @@ returns 200 at `/robots.txt` and rejects the literal braces URL.
 Browser QA checked desktop and 390×844 layouts, loaded images, no horizontal
 mobile overflow, native keyboard expansion of the example finding, and readable
 installation/configuration content. The synthetic example is labelled and
-contains no customer code. The hero export is 143,968 bytes; the App icon is
-59,841 bytes. Social preview is 1280×640 JPEG and under 1 MB.
+contains no customer code. The hero export is 143,968 bytes. The current 512px
+App icon is 303,464 bytes; the separate 88px landing WebP is 3,040 bytes.
+Social preview is 1280×640 JPEG and under 1 MB.
 
 Production indexing requires both production deployment metadata and the exact
 canonical hostname. Preview, local, candidate, and old aliases remain noindex.

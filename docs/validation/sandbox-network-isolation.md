@@ -22,8 +22,11 @@ review processes, or writable state from a review VM. Fixed toolchain and native
 browser installers run before dependency declarations arrive. Node package
 manifests are projected to dependency data; repository package-manager config,
 plugins, scripts, and executable entry points do not cross this boundary. Bun,
-npm, pnpm, and Yarn 1 acquisition disables scripts; pnpm also disables its hook
-file. The original repository install runs in the offline review VM using the
+npm, pnpm, and Yarn acquisition disables scripts; pnpm also disables its hook
+file. Modern Yarn uses its pinned `@yarnpkg/cli-dist` distribution, admits only
+registry/workspace lock resolutions, and exports a shared cache. Offline
+materialization uses `YARN_ENABLE_NETWORK=false`, not the unsupported `--offline`
+flag. The original project configuration and hooks execute only offline. The original repository install runs in the offline review VM using the
 acquired caches, so project lifecycle hooks still execute during real setup.
 Python acquisition prohibits source builds, Cargo fetch receives only an official
 Rust distribution channel, and Go acquisition uses declarative module inputs.
@@ -75,3 +78,12 @@ had no installation path for unavailable Composer, Swift, Gradle, Maven, Ruby,
 Deno, or .NET toolchains; this change does not claim those toolchains are now
 supported. Installing a tool or fetching an artifact must use the isolated
 acquisition boundary rather than widening the review VM's egress.
+
+
+A local Yarn 4.18.0 probe on September 13 acquired `is-number@7.0.0` from a
+projected manifest, then materialized the original project using the exported
+cache with Yarn network access disabled. The project hook did not run during
+acquisition and did run offline; the exact lockfile remained unchanged. This
+verifies the real CLI/cache contract, not a new native sandbox certification.
+See Yarn's [install contract](https://yarnpkg.com/cli/install) and
+[network and script settings](https://yarnpkg.com/configuration/yarnrc).
