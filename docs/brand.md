@@ -55,14 +55,17 @@ patterns. These standards also apply to Slop Sheriff's own comments.
 ## Imagery
 
 Finding comments use a 64×64 reaction portrait beside the severity and
-introduction. Blocking uses the [alarmed robot](assets/slop-sheriff-alarmed-v1.png),
-Important the [skeptical robot](assets/slop-sheriff-concerned-v1.png), Improvement
-the [inspired robot](assets/slop-sheriff-idea-v1.png), and Nitpick the
-[cheeky robot](assets/slop-sheriff-nitpick-v1.png). Both personality-off settings
+introduction. Blocking uses the [alarmed robot](assets/slop-sheriff-alarmed-v2.png),
+Important the [skeptical robot](assets/slop-sheriff-concerned-v2.png), Improvement
+the [inspired robot](assets/slop-sheriff-idea-v2.png), and Nitpick the
+[cheeky robot](assets/slop-sheriff-nitpick-v2.png). Both personality-off settings
 remove these portraits. The GitHub account avatar stays the same; the reaction
 is an image inside the comment body.
 
 The four reusable 256×256 PNG exports were generated from the existing icon.
+Their face screens contain only two amber LED eye shapes: no pupils, irises,
+separate eyebrows, punctuation or decorative symbols. Expression comes from
+the eyes' shape, angle and spacing.
 Reviews select a fixed image URL from severity, without image-generation calls,
 new model output fields or changes to finding identity. The shared formatter
 uses the same artwork on the landing page. GitHub comments reference the public
