@@ -8,6 +8,7 @@ import { acquisitionNetworkPolicy } from "../src/review/sandbox-acquisition";
 import { beginAcquisitionCommand, exportAcquisitionCommand } from "../src/review/environment-acquisition";
 import { reviewNetworkPolicy } from "../src/github/review-workspace";
 import { discoverabilityApplies } from "../src/review/discoverability";
+import { DEFAULT_AGENT_BROWSER_INSTALL_SPEC } from "@agent-browser/eve/sandbox";
 
 describe("review environment setup", () => {
   test("rewrites official HTTP apt mirrors in list and deb822 sources for the domain firewall", async () => {
@@ -63,14 +64,15 @@ describe("review environment setup", () => {
 
   test("native Eve browser installation uses a local prefix and checks launch and cleanup", async () => {
     const commands: string[] = [];
+    const expectedVersion = DEFAULT_AGENT_BROWSER_INSTALL_SPEC.replace(/^agent-browser@/, "agent-browser ");
     const browser = await prepareReviewerBrowser({
       run: async ({ command }) => {
         commands.push(command);
-        return { exitCode: 0, stderr: "", stdout: command.startsWith("printf") ? "/home/vercel-sandbox/.local/bin/agent-browser" : command.includes("--version") ? "agent-browser 0.37.1" : "" };
+        return { exitCode: 0, stderr: "", stdout: command.startsWith("printf") ? "/home/vercel-sandbox/.local/bin/agent-browser" : command.includes("--version") ? expectedVersion : "" };
       },
     });
-    expect(browser).toEqual({ provider: "agent-browser", command: "/home/vercel-sandbox/.local/bin/agent-browser", version: "agent-browser 0.37.1" });
-    expect(commands.some((command) => command.includes("install -g agent-browser@0.37.1") && command.includes('NPM_CONFIG_PREFIX="$HOME/.local"'))).toBe(true);
+    expect(browser).toEqual({ provider: "agent-browser", command: "/home/vercel-sandbox/.local/bin/agent-browser", version: expectedVersion });
+    expect(commands.some((command) => command.includes(`install -g ${DEFAULT_AGENT_BROWSER_INSTALL_SPEC}`) && command.includes('NPM_CONFIG_PREFIX="$HOME/.local"'))).toBe(true);
     expect(commands.some((command) => command.includes("open about:blank"))).toBe(true);
     expect(commands.at(-1)).toContain("close");
     await expect(prepareReviewerBrowser({ run: async () => ({ exitCode: 9, stdout: "", stderr: "browser packages unavailable" }) })).rejects.toThrow();

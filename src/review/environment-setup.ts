@@ -3,7 +3,7 @@ import type { SandboxSession } from "eve/sandbox";
 import { lockedDependencyDeclarations, acquireLockedEcosystemDependencies, materializeLockedEcosystemDependencies } from "./locked-dependency-acquisition";
 import { acquireEnvironment, dependencyAcquisitionCommand, projectAcquisitionManifest, acquisitionDeclarationPath, acquisitionRustChannel } from "./environment-acquisition";
 import { requireSandboxCommand, type AcquisitionFactory } from "./sandbox-acquisition";
-import { buildAgentBrowserCommand, installAgentBrowser } from "@agent-browser/eve/sandbox";
+import { buildAgentBrowserCommand, installAgentBrowser, DEFAULT_AGENT_BROWSER_INSTALL_SPEC } from "@agent-browser/eve/sandbox";
 import { rcompare, satisfies } from "semver";
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
@@ -350,7 +350,7 @@ export async function prepareReviewEnvironment(sandbox: SetupSandbox, identity: 
   }
   const browserRequired = discoverabilityApplies(review.paths, review.publicRoots) || review.paths.some((path) => /\.(?:[jt]sx|vue|svelte|html?)$/i.test(path));
   const cachedBrowser = browserRequired ? await sandbox.run({ command: '"$HOME/.local/bin/agent-browser" --version' }) : undefined;
-  const hasTemplateBrowser = cachedBrowser?.exitCode === 0 && String(cachedBrowser.stdout).trim() === "agent-browser 0.37.1";
+  const hasTemplateBrowser = cachedBrowser?.exitCode === 0 && String(cachedBrowser.stdout).trim() === DEFAULT_AGENT_BROWSER_INSTALL_SPEC.replace(/^agent-browser@/, "agent-browser ");
   let extraRoots: readonly string[] = [];
   const preliminary = planReviewEnvironment(files, paths, "24.0.0", browserRequired);
   const plan = preliminary.steps.length === 0 ? preliminary : await acquireEnvironment(sandbox, async (acquisition) => {

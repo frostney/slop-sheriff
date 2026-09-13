@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { generateText, streamText, APICallError } from "ai";
+import { generateText, streamText, simulateReadableStream, APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { createGateway } from "@ai-sdk/gateway";
 import schema from "../convex/schema";
@@ -73,6 +73,22 @@ test("captures early Gateway metadata before a failed stream through the install
   release?.();
   await consumption;
   expect([...rows.values()][0]).toMatchObject({ generationId: "gen_stream", outcome: "failed" });
+});
+
+test("a successful SDK terminal event retains cost observed earlier in the stream", async () => {
+  const rows: CostObservation[] = [];
+  const telemetry = createCostTelemetry({ scope: () => scope, record: async row => { rows.push(row); } });
+  const streamed = streamText({ model: new MockLanguageModelV4({ doStream: async () => ({
+    stream: simulateReadableStream({ initialDelayInMs: 0, chunkDelayInMs: 0, chunks: [
+      { type: "stream-start" as const, warnings: [] },
+      { type: "response-metadata" as const, id: "gen_early", providerMetadata: { gateway: { cost: "0.42" } } },
+      { type: "finish" as const, finishReason: result.finishReason, usage: result.usage },
+    ] }),
+  }) }), prompt: "fixture", maxRetries: 0,
+    telemetry: { isEnabled: true, integrations: [telemetry] } });
+  await streamed.consumeStream();
+  expect(rows.some(row => row.sdkCostUsd === 0.42)).toBe(true);
+  expect(rows.at(-1)).toMatchObject({ outcome: "succeeded", generationId: "gen_early", sdkCostUsd: 0.42, inputTokens: 100 });
 });
 
 test("durable rows survive failed attempts and independently reconcile delayed Gateway billing once", async () => {

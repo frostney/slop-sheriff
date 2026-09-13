@@ -46,4 +46,14 @@ the user's approximately $80 attempt total without all its billing records.
 Offline tests prove accounting and recovery behavior; they do not establish paid
 review savings or model quality.
 
+Requirement discovery does not infer product obligations from unchanged
+development skill manuals or dependency documentation solely through shared path
+words. Applicable governance, changed documents, trusted configuration and links
+from selected sources still include them. Model-facing indexes retain every
+selected source and explicit obligation ID, with base/head line locations; exact
+source text remains available through the requirement reader. Identical base/head
+documents are delivered once with both revisions identified. Signed storage keeps
+the complete metadata and integrity hashes. Fresh lane contexts follow evidence
+or investigation needs rather than a fixed model-step count.
+
 Gateway authentication/payment admission rejections are recorded from the installed provider's typed errors, with generation IDs preserved even on thrown failures. The authenticated `/cost/nonbillable-attempt` endpoint checks the complete paginated attempt: at least one recorded failed request, explicit rejection classification for every request, no generation IDs and no positive recorded usage. Absent or unfinished telemetry never proves zero work. Recovery uses this narrow proof for a saved admission-only receipt; accounting still leaves unreconciled billing quantities explicitly unknown. Paid full/delta continuations triggered by review control responses retain their review accounting identity.

@@ -116,10 +116,10 @@ export function createCostTelemetry(input: {
       const cost = typeof rawCost === "number" || (typeof rawCost === "string" && rawCost.trim() !== "") ? Number(rawCost) : NaN;
       await input.record({
         ...call.observation, outcome: call.observation.outcome === "failed" ? "failed" : "succeeded", actualModel: event.modelId, generationId: generationId ?? call.observation.generationId,
-        inputTokens: event.usage.inputTokens ?? null, outputTokens: event.usage.outputTokens ?? null,
-        cacheReadTokens: event.usage.inputTokenDetails.cacheReadTokens ?? null,
-        cacheWriteTokens: event.usage.inputTokenDetails.cacheWriteTokens ?? null,
-        sdkCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : null,
+        inputTokens: event.usage.inputTokens ?? call.observation.inputTokens, outputTokens: event.usage.outputTokens ?? call.observation.outputTokens,
+        cacheReadTokens: event.usage.inputTokenDetails.cacheReadTokens ?? call.observation.cacheReadTokens,
+        cacheWriteTokens: event.usage.inputTokenDetails.cacheWriteTokens ?? call.observation.cacheWriteTokens,
+        sdkCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : call.observation.sdkCostUsd,
       });
       calls.delete(event.callId);
     },
