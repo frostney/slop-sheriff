@@ -1,3 +1,5 @@
+import { projectLaneRegistryDigest } from "../../src/review/project-lane-identity";
+import { reviewConfigFromAuth } from "../../src/config/trusted-review-config";
 import type { SessionAuthContext } from "eve/context";
 import { z } from "zod";
 import {
@@ -55,5 +57,6 @@ export async function currentLaneCheckpointIdentity(
     headSha: identity.headSha,
     patchFingerprint: identity.patchFingerprint,
     evidenceDigest: ledger.digest,
+    laneRegistryDigest: projectLaneRegistryDigest(reviewConfigFromAuth(auth)),
   };
 }

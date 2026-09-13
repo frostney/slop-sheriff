@@ -14,11 +14,14 @@ or act as a general-purpose GitHub assistant.
   normalized pull-request patch changed since the baseline.
 - **Revalidation:** a separate evidence pass over selected prior findings. All
   unresolved Blocking/Important findings are selected; Improvements are
-  selected only when their path or symbol is relevant to the delta.
-- **Review axis:** exactly one of `deduplication`, `claim-and-specification`,
-  `engineering-quality`, `test-against-spec`, conditional `discoverability`,
-  conditional `test-health`, or conditional `writing-quality`. “Mode”,
-  “perspective”, and arbitrary lane taxonomies are not synonyms for axes here.
+  selected when their path or symbol is relevant to the delta. Legacy overlong
+  findings are also selected once so their wording can migrate before publication.
+- **Review axis:** one of the built-in axes `deduplication`, `claim-and-specification`,
+  `engineering-quality`, `test-against-spec`, `discoverability`,
+  `test-health`, or `writing-quality`. The broad engineering-quality core always
+  runs; content-based triage selects specialist axes with recorded reasons.
+  Trusted-base configuration can also define project-specific axes with
+  declarative criteria and references, without a modified app deployment.
 - **Test against specification:** observation of delivered behavior through a
   real interface against explicit requirements, with each result recorded as
   passed, failed, unverified, or out of scope. Source inspection alone cannot
@@ -31,8 +34,9 @@ or act as a general-purpose GitHub assistant.
   implementation; useful tests catch broken behavior and tolerate internal
   refactors. Assertions that mirror implementation details are brittle evidence.
 - **Impact summary:** a consequence summary of at most 300 characters, displayed
-  with expandable full analysis. Presentation changes do not change finding
-  identity.
+  beneath an expandable evidence section, followed by Risk. Findings have a
+  short introduction and at most 200 words in total, targeting 100 to 160.
+  Presentation changes do not change finding identity.
 - **Finding lane:** a bounded subagent used only to revalidate selected prior
   findings. It is not a new review axis.
 - **Effective patch:** normalized per-file PR change that ignores file ordering
@@ -42,6 +46,9 @@ or act as a general-purpose GitHub assistant.
   manifest, included patch chunks, and classified-file metadata for one exact
   base, head, and effective-patch fingerprint. An Eve hook creates it after
   root head verification and before the next model step.
+- **Prepared environment:** the shared exact-head checkout with installed
+  toolchains and locked dependencies. A receipt records declaration hashes and
+  observed versions; setup failure prevents lane dispatch.
 - **Evidence ledger:** the immutable application-owned root for one exact
   review identity. Its digest binds the patch bundle, capability inventory,
   exact-head Checks, artifact provenance, common probes, and each typed gap's
@@ -56,9 +63,11 @@ or act as a general-purpose GitHub assistant.
   missing, malformed, failed, or unusable. This state requires an authorized
   manual full review; it never causes an automatic second full review.
 - **Recoverable review failure:** a current-head execution that retained exact
-  checkpoint identity and a sanitized failure envelope. An authorized
-  continuation may resume its recorded missing stages without replacing the
-  last successfully published baseline.
+  checkpoint identity and a sanitized failure envelope. The lifecycle service
+  verifies repaired prerequisites and stops obsolete workers before resuming
+  missing stages. Completed lanes are reused only after identity, policy,
+  coverage and evidence verification. A changed runtime policy requires fresh
+  analysis. The last published baseline remains intact throughout recovery.
 - **Pending publication:** an application-assembled, validated v2 report bound
   to the trusted repository, pull request, base, head, patch, plan, and active
   axes. It is durable beside the unchanged baseline before visible review
@@ -81,13 +90,17 @@ coverage, verdict derivation, or publication targets. Typed application code
 owns those fields, exact-head evidence provenance, gap routing, and the
 canonical merge.
 
-GitHub is the authoritative review-state store. Convex memory is advisory and
-scoped by immutable GitHub repository ID. It stores only normalized finding,
-invariant, cause, remedy, outcome, and provenance fields. Vercel Sandbox holds
-only a credential-free working copy and disposable probe artifacts. Telemetry
-stores metadata such as models, fallback outcome, token/cache counts, exact
-Gateway-reported cost, duration, outcome, axis, and review kind, not prompts,
-source, findings evidence, credentials, or raw repository content.
+GitHub owns published review state. Dedicated Convex lifecycle tables own
+admission, scheduling, execution attempts and the publication outbox. Signed
+evidence storage retains checkpoints and artifacts for exact-scope recovery;
+cost tables retain usage and reconciliation records. Each is scoped by immutable
+repository identity. Normalized repository memory remains advisory.
+
+Vercel Sandbox holds a credential-free working copy and disposable probes.
+Review sessions remain offline; separate acquisition environments download
+dependencies. A physical workspace receipt is never restored from evidence
+storage. Telemetry records model identities, tokens, cost, timing and outcome;
+it excludes prompts, source, finding evidence and credentials.
 
 Installation lifecycle payloads become authoritative only after Connect OIDC
 verification. The installation-to-repository association admits new memory and

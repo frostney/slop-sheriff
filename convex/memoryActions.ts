@@ -203,15 +203,8 @@ export const ingestReview = internalAction({
 export const searchRepository = internalAction({
   args: {
     repositoryId: v.string(),
-    axis: v.union(
-      v.literal("deduplication"),
-      v.literal("claim-and-specification"),
-      v.literal("engineering-quality"),
-      v.literal("discoverability"),
-      v.literal("test-against-spec"),
-      v.literal("test-health"),
-      v.literal("writing-quality"),
-    ),
+    // The Zod request boundary below validates built-ins and safe project lane IDs.
+    axis: v.string(),
     query: v.string(),
     embedding: vEmbedding,
     limit: v.number(),

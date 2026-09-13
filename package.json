@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit && tsc -p convex/tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agent-browser/eve": "0.37.1",
     "@ai-sdk/gateway": "4.0.78",
     "@chat-adapter/github": "4.40.0",
     "@convex-dev/rag": "0.7.6",
@@ -33,12 +34,14 @@
     "convex": "1.45.0",
     "eve": "0.52.5",
     "js-tiktoken": "1.0.21",
+    "semver": "7.8.5",
     "yaml": "2.9.0",
     "zod": "4.6.1"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "24.13.4",
+    "@types/semver": "7.8.0",
     "convex-test": "0.0.57",
     "just-bash": "3.4.2",
     "typescript": "7.0.2"

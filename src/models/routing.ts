@@ -8,6 +8,8 @@ import {
 } from "../config/review-config";
 import { isReviewAxis, type ReviewAxis } from "../review/axes";
 
+import { assertConfiguredLane } from "../review/project-lanes";
+
 export const routingAttribute = "known_good_review_config";
 const routingPattern =
   /^<known-good-review-routing>(\{[^<\n]+\})<\/known-good-review-routing>/;
@@ -96,6 +98,7 @@ export function chainForRoute(
   route: ReviewRoute,
 ): ModelChain {
   if (route.role === "lane") {
+    assertConfiguredLane(route.axis, config);
     return modelsForAxis(config, route.axis);
   }
   if (route.role === "scout") {

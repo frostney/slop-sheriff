@@ -1,3 +1,4 @@
+import { reviewPolicyDigest } from "../src/config/review-policy-identity";
 import { expect, spyOn, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import assembleTool from "../agent/tools/assemble_review_report";
@@ -14,7 +15,7 @@ import { writeLaneCheckpoint } from "../src/review/lane-checkpoint";
 // Keep Eve's durable state and GitHub HTTP injectable; execute the real tool,
 // canonical assembler, signed checkpoint reader, and publication staging path.
 test("staging failure retains reconciliation work until GitHub has the report", async () => {
-  const identity = {
+  const identity = { reviewPolicyDigest: reviewPolicyDigest("", "a".repeat(40)),
     executionRevision: "review-report-v2" as const, repositoryId: "R_repo", pullRequest: 1,
     baseSha: "a".repeat(40), headSha: "b".repeat(40), patchFingerprint: "c".repeat(64),
     planKind: "full" as const, baselineHead: null, reviewPaths: [],
@@ -45,6 +46,7 @@ test("staging failure retains reconciliation work until GitHub has the report", 
   process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY = "ef".repeat(32);
   const signed = authenticatedEvidenceSandbox(sandbox, "root", process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY);
   const draft = {
+  actionSummary: "Reviewed the affected publication paths and retained the observed evidence.", additionalConcerns: [],
     scope: { claim: "Review retry behavior", dirtyState: "clean" },
     coverage: { staticOnly: [], unreached: [] },
     churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] },
@@ -73,6 +75,19 @@ test("staging failure retains reconciliation work until GitHub has the report", 
       plan: JSON.stringify({ ...identity, kind: "full" }), reviewFiles: [],
     });
     const ctx = { session: { id: "root", auth: { current: auth } }, getSandbox: async () => sandbox } as unknown as Parameters<typeof execute>[1];
+    await expect(execute({ draft: { ...draft, freshFindings: [{
+      severity: "IMPORTANT", category: "QUALITY", title: "Preserve the review evidence",
+      location: { path: "src/review.ts", line: 1, symbol: null },
+      evidence: ["A concrete observation. ".repeat(60)], impact: "The report loses evidence.",
+      requirementIds: [],
+  introduction: "The recorded publication path can replay the same operation without reusing its identity, so a retry exposes duplicate output to readers even though the original work already finished successfully.",
+  principle: "Retries must preserve the recorded publication identity.",
+  risk: "A retry can duplicate output for every reader of the affected review.",
+  impactSummary: "The report loses evidence.", remedy: "Retain the observation.", staticOnly: false, churn: null,
+    }] } }, ctx)).rejects.toThrow("200-word inline limit");
+    expect(writes).toBe(0);
+    expect(report?.report).toBeNull();
+    expect(recovery?.stage).toBe("axes-complete");
     await expect(execute({ draft }, ctx)).rejects.toThrow();
     expect(writes).toBe(1);
     expect(recovery?.stage).toBe("axes-complete");

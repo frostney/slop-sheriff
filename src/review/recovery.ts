@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reviewAxes } from "./axes";
+import { reviewAxisSchema, maxReviewLanes } from "./axes";
 import {
   schemaDiagnosticSchema,
   type SchemaDiagnostic,
@@ -28,11 +28,12 @@ export const reviewRecoveryStateSchema = z
     baseSha: revisionSchema,
     headSha: revisionSchema,
     patchFingerprint: fingerprintSchema,
+    laneRegistryDigest: fingerprintSchema.optional(),
     planKind: z.enum(["full", "delta"]),
-    activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
+    activeAxes: z.array(reviewAxisSchema).min(1).max(maxReviewLanes),
     selectedFindingIds: z.array(findingIdSchema).max(100),
     stage: z.enum(reviewRecoveryStages),
-    completedAxes: z.array(z.enum(reviewAxes)).max(reviewAxes.length),
+    completedAxes: z.array(reviewAxisSchema).max(maxReviewLanes),
   })
   .superRefine((state, context) => {
     const active = new Set(state.activeAxes);
@@ -106,8 +107,9 @@ export const reviewFailureEnvelopeSchema = z
     baseSha: revisionSchema,
     headSha: revisionSchema,
     patchFingerprint: fingerprintSchema,
+    laneRegistryDigest: fingerprintSchema.optional(),
     planKind: z.enum(["full", "delta"]),
-    activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
+    activeAxes: z.array(reviewAxisSchema).min(1).max(maxReviewLanes),
     selectedFindingIds: z.array(findingIdSchema).max(100),
     failedStage: z.enum([
       "axes",
@@ -115,7 +117,7 @@ export const reviewFailureEnvelopeSchema = z
       "reconciliation",
       "publication",
     ]),
-    completedAxes: z.array(z.enum(reviewAxes)).max(reviewAxes.length),
+    completedAxes: z.array(reviewAxisSchema).max(maxReviewLanes),
     errorClass: errorClassSchema,
     diagnostics: z.array(schemaDiagnosticSchema).max(20).optional(),
     retryEligible: z.boolean(),
@@ -178,7 +180,7 @@ export function beginReviewRecovery(input: {
   readonly activeAxes: ReviewRecoveryState["activeAxes"];
   readonly identity: Pick<
     ReviewRecoveryState,
-    "baseSha" | "headSha" | "patchFingerprint" | "planKind"
+    "baseSha" | "headSha" | "patchFingerprint" | "planKind" | "laneRegistryDigest"
   >;
   readonly selectedFindingIds: readonly string[];
 }): ReviewRecoveryState {
@@ -188,6 +190,7 @@ export function beginReviewRecovery(input: {
     baseSha: input.identity.baseSha,
     headSha: input.identity.headSha,
     patchFingerprint: input.identity.patchFingerprint,
+    laneRegistryDigest: input.identity.laneRegistryDigest,
     planKind: input.identity.planKind,
     activeAxes: input.activeAxes,
     selectedFindingIds: input.selectedFindingIds,
@@ -200,7 +203,7 @@ export function validateReviewRecoveryIdentity(
   state: ReviewRecoveryState,
   identity: Pick<
     ReviewRecoveryState,
-    "baseSha" | "headSha" | "patchFingerprint" | "planKind"
+    "baseSha" | "headSha" | "patchFingerprint" | "planKind" | "laneRegistryDigest"
   >,
 ): ReviewRecoveryState {
   const recovery = reviewRecoveryStateSchema.parse(state);
@@ -208,7 +211,8 @@ export function validateReviewRecoveryIdentity(
     recovery.baseSha !== identity.baseSha ||
     recovery.headSha !== identity.headSha ||
     recovery.patchFingerprint !== identity.patchFingerprint ||
-    recovery.planKind !== identity.planKind
+    recovery.planKind !== identity.planKind ||
+    recovery.laneRegistryDigest !== identity.laneRegistryDigest
   ) {
     throw new Error("Review recovery state does not match the trusted review");
   }
@@ -310,6 +314,7 @@ export function buildReviewFailureEnvelope(input: {
     baseSha: recovery.baseSha,
     headSha: recovery.headSha,
     patchFingerprint: recovery.patchFingerprint,
+    laneRegistryDigest: recovery.laneRegistryDigest,
     planKind: recovery.planKind,
     activeAxes: recovery.activeAxes,
     selectedFindingIds: recovery.selectedFindingIds,

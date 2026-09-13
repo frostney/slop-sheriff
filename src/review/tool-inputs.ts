@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reviewFindingSchema } from "./findings";
+import { reviewFindingRevalidationSchema } from "./findings";
 import { reviewReportDraftSchema } from "./report-assembly";
 
 export const assembleReviewReportInputSchema = z
@@ -9,5 +9,5 @@ export const assembleReviewReportInputSchema = z
 
 export const recordReviewRevalidationInputSchema = z
   .strictObject({
-    findings: z.array(reviewFindingSchema).max(100),
+    findings: z.array(reviewFindingRevalidationSchema).max(100),
   });

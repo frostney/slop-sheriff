@@ -1,3 +1,4 @@
+import { prepareRequirementInventory, readRequirementSource } from "./requirements";
 import { createHash, randomUUID } from "node:crypto";
 import type { RuntimeSandboxSession } from "eve/sandbox";
 import { Tiktoken } from "js-tiktoken/lite";
@@ -36,6 +37,8 @@ import {
   writeReviewEvidenceManifest,
 } from "./evidence-bundle";
 import type { PreparedGitHubEvidence } from "./github-evidence";
+import { prepareReviewEnvironment } from "./environment-setup";
+import { localWorkspaceReceiptPath, physicalWorkspaceReceipt } from "./physical-workspace";
 import {
   commonHistorySchema,
   commonMemoryQuery,
@@ -166,6 +169,8 @@ async function preparedLedger(
   });
   if (ledgerSource === null) return null;
   const ledger = await readReviewEvidenceLedger(sandbox, identity);
+  if (!ledger.requirements) return null;
+  for (const source of ledger.requirements) await readRequirementSource(sandbox, identity.patchFingerprint, ledger.requirements, source.id);
   const manifest = await readReviewEvidenceManifest(sandbox, identity);
   if (!matchesPreparedScope(manifest, files)) {
     throw new Error("Prepared evidence ledger does not match the exact file scope");
@@ -179,6 +184,7 @@ async function preparedLedger(
     }
   }
   const capabilities = await readCapabilityPreflight(sandbox, identity);
+  if (!capabilities.setup) return null; // Rebuild ledgers prepared before environment provisioning.
   validateReviewEvidenceLedgerComponents(ledger, {
     capabilities,
     manifest,
@@ -187,14 +193,33 @@ async function preparedLedger(
   return ledger;
 }
 
-export async function prepareReviewEvidence(
+// Tools can be retried or invoked concurrently before the immutable ledger
+// exists. Serialize the whole checkout/setup transaction on the shared sandbox.
+const pendingPreparations = new Map<string | RuntimeSandboxSession, Promise<ReviewEvidenceLedger>>();
+
+export function prepareReviewEvidence(
+  ...args: Parameters<typeof prepareReviewEvidenceOnce>
+): Promise<ReviewEvidenceLedger> {
+  const sandbox = args[0];
+  const key = sandbox.id || sandbox;
+  const prior = pendingPreparations.get(key);
+  const pending = (prior ? prior.catch(() => undefined) : Promise.resolve())
+    .then(() => prepareReviewEvidenceOnce(...args));
+  pendingPreparations.set(key, pending);
+  void pending.finally(() => {
+    if (pendingPreparations.get(key) === pending) pendingPreparations.delete(key);
+  }).catch(() => undefined);
+  return pending;
+}
+
+async function prepareReviewEvidenceOnce(
   sandbox: RuntimeSandboxSession,
   trusted: TrustedGitHubContext,
   inputFiles: unknown,
   input: {
     readonly collectGitHubEvidence: () => Promise<PreparedGitHubEvidence>;
     readonly collectMemory: (query: string) => Promise<MemoryAvailability>;
-    readonly config: Pick<ReviewConfig, "embedding">;
+    readonly config: Pick<ReviewConfig, "embedding"> & Partial<Pick<ReviewConfig, "publicRoots" | "requirementPaths" | "lanes">>;
     readonly planKind: "full" | "delta";
     readonly workspaceDependencies?: ReviewWorkspaceDependencies;
   },
@@ -220,7 +245,20 @@ export async function prepareReviewEvidence(
     planKind: input.planKind,
   };
   const existing = await preparedLedger(sandbox, identity, files);
+  const physicalReceipt = (ledger: ReviewEvidenceLedger) => physicalWorkspaceReceipt(sandbox.id, trusted, ledger);
+  const provisionEnvironment = () => prepareReviewEnvironment(sandbox, identity, {
+    paths: files.map((file) => file.path), publicRoots: input.config.publicRoots ?? [],
+  });
   if (existing) {
+    const receipt = await sandbox.readTextFile({ path: localWorkspaceReceiptPath });
+    const checkout = receipt === physicalReceipt(existing)
+      ? await sandbox.run({ command: "cd /workspace && git rev-parse --verify HEAD" }) : null;
+    if (!checkout || checkout.exitCode !== 0 || String(checkout.stdout).trim() !== trusted.headSha) {
+      // Restore physical prerequisites without regenerating immutable evidence or completed lanes.
+      await prepareReviewWorkspace(trusted, sandbox, input.workspaceDependencies);
+      await provisionEnvironment();
+      await sandbox.writeTextFile({ path: localWorkspaceReceiptPath, content: physicalReceipt(existing) });
+    }
     console.info(
       JSON.stringify({
         event: "known-good-review.common_work.reused",
@@ -329,7 +367,11 @@ export async function prepareReviewEvidence(
     entries,
   });
   await writeReviewEvidenceManifest(sandbox, manifest);
-  const capabilities = await runCapabilityPreflight(sandbox, identity);
+  const requirements = await prepareRequirementInventory(sandbox, {
+    ...identity, paths: files.map((file) => file.path), config: input.config,
+  });
+  const setup = await provisionEnvironment();
+  const capabilities = await runCapabilityPreflight(sandbox, identity, setup);
   if (capabilities.created) {
     console.info(
       JSON.stringify({
@@ -415,8 +457,10 @@ export async function prepareReviewEvidence(
     identity,
     manifest,
     probes,
+    requirements,
   });
   await writeReviewEvidenceLedger(sandbox, ledger);
+  await sandbox.writeTextFile({ path: localWorkspaceReceiptPath, content: physicalReceipt(ledger) });
   console.info(
     JSON.stringify({
       event: "known-good-review.common_work.completed",

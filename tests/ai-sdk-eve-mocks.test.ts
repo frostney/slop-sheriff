@@ -27,6 +27,10 @@ const validFinding = {
   location: { path: "src/review.ts", line: 1, symbol: null },
   evidence: ["The model-facing schema rejects application-owned status."],
   impact: "Invalid review output cannot reach application state.",
+  requirementIds: [],
+  introduction: "The recorded publication path can replay the same operation without reusing its identity, so a retry exposes duplicate output to readers even though the original work already finished successfully.",
+  principle: "Retries must preserve the recorded publication identity.",
+  risk: "A retry can duplicate output for every reader of the affected review.",
   impactSummary: "Invalid review output cannot reach application state.",
   remedy: "Keep the provider-visible schema aligned with the tool boundary.",
   staticOnly: true,
@@ -34,6 +38,7 @@ const validFinding = {
 };
 
 const validDraft = {
+  actionSummary: "Validated the report publication contract.", additionalConcerns: [],
   scope: { claim: "Validate the review contract.", dirtyState: "clean" },
   coverage: { staticOnly: [], unreached: [] },
   churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] },

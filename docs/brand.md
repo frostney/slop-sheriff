@@ -6,22 +6,44 @@ The joke belongs to the bot. A contributor is never the punchline.
 
 ## Voice
 
-Use plain technical explanations. Keep cowboy language to short status lines
-and presentation labels. Do not add accents, repeated greetings, threats,
-insults, or jokes about a contributor's competence. Severity and verdict names
-keep their literal meaning. A clean review means no findings were reported,
-not a guarantee that the code has no defects.
+Slop Sheriff is a technically fluent cowboy robot. The default theatrical voice
+uses contextual frontier imagery in finding introductions, action summaries, and
+verified-fix replies. Understated mode keeps the wit quieter. Off mode uses plain
+technical prose. The model writes this wording for the observed concern; the
+application never prepends canned greetings or jokes.
 
-| Situation | Default voice | `personality: false` |
-| --- | --- | --- |
-| Running | The sheriff is on patrol. Review in progress. | The review is currently running. |
-| Complete | Patrol complete. | No extra status line. |
-| Expanded impact label | The full rundown | Full impact analysis |
-| Failure | The review did not complete. See the Check Run for details. | Same precise failure message. |
+Configure the trusted base branch's `.github/slop-sheriff.yml`:
 
-Finding titles, evidence, impact summaries and fixes remain technical in both
-modes. The visible impact summary is limited to 300 characters. Readers can
-expand the full analysis without losing detail or changing finding identity.
+```yaml
+voice: theatrical # C; default. Alternatives: understated (B), off.
+# Optional style guide, read only at the trusted base revision:
+voiceGuide: docs/review-voice.md
+```
+
+`personality: false` remains compatible and overrides the voice setting to off.
+The custom guide controls style only. Evidence, exact technical terms, severity,
+requirements, and the application-owned recommendation stay invariant. Keep
+Impact and Risk plain in every mode. Never use em dashes. Humor can target the
+technical situation, never a contributor's competence.
+
+Each finding starts with an emoji headline and severity alone: 🚨 Blocking,
+⚠️ Important, 💡 Improvement, or 🧹 Nitpick. Its 25 to 45 word introduction
+explains the concern. Expandable **Evidence and recommended change** contains
+concrete evidence, the applicable principle or requirement, and fix direction.
+Visible **Impact** describes the consequence in at most 300 characters. Visible
+**Risk** is one plain sentence describing trigger, reach, and uncertainty.
+Target 100 to 160 words; the complete finding must not exceed 200 words.
+Overlong wording is rejected for revision before publication.
+
+One mutable summary describes the current review. Outstanding Blocking or
+Important findings mean **changes needed**, regardless of GitHub enforcement.
+**Clear** requires completed verification of the current revision with none
+outstanding; optional findings can remain. A new revision returns to reviewing.
+Incomplete or outdated reviews cannot be clear. Only actionable unrelated
+existing concerns appear in additional details. Human thread resolution is not
+fix evidence; an authorized maintainer's explicit dismissal and reason remain
+distinct from a verified fix. Fix replies name the actual correction and link
+the exact verified commit.
 
 Writing-quality findings identify an observable problem and offer a specific
 remedy. Flag stiff phrasing, redundancy, vague promises, unsupported precision,
@@ -32,13 +54,32 @@ patterns. These standards also apply to Slop Sheriff's own comments.
 
 ## Imagery
 
+Finding comments use a 64×64 reaction portrait beside the severity and
+introduction. Blocking uses the [alarmed robot](assets/slop-sheriff-alarmed-v2.png),
+Important the [skeptical robot](assets/slop-sheriff-concerned-v2.png), Improvement
+the [inspired robot](assets/slop-sheriff-idea-v2.png), and Nitpick the
+[cheeky robot](assets/slop-sheriff-nitpick-v2.png). Both personality-off settings
+remove these portraits. The GitHub account avatar stays the same; the reaction
+is an image inside the comment body.
+
+The four reusable 256×256 PNG exports were generated from the existing icon.
+Their face screens contain only two amber LED eye shapes: no pupils, irises,
+separate eyebrows, punctuation or decorative symbols. Expression comes from
+the eyes' shape, angle and spacing.
+Reviews select a fixed image URL from severity, without image-generation calls,
+new model output fields or changes to finding identity. The shared formatter
+uses the same artwork on the landing page. GitHub comments reference the public
+`slop-sheriff.dev/assets/` URLs, so deploy the assets before publishing comments
+from this version. Embedded image bytes never enter the comment text.
+
 - [Brand illustration](assets/slop-sheriff-brand.png): the main wordmark and
   robot sheriff in a desert scene.
-- [App avatar](assets/slop-sheriff-avatar.png): the same robot in a circular
-  badge, with no text.
+- [App avatar](assets/slop-sheriff-avatar.png): the same robot's face, hat, star
+  and turquoise bandana in a square composition, with no text or enclosing ring.
 
-Use charcoal, parchment, terracotta, brass, and turquoise. Keep the cowboy hat,
-star badge, and notebook. Only the banner has lettering on its props: the sign
+Use charcoal, parchment, terracotta, brass, and turquoise. Keep the cowboy hat
+and star badge. The notebook belongs in the banner, not the small avatar. Only
+the banner has lettering on its props: the sign
 says “Clean code →” and both books say “Review Notes”. The avatar stays text-free.
 Code-shaped tracks are recessed into the sand with displaced edges and shadows.
 Both assets were generated for this project and revised to the owner's brief.
@@ -46,7 +87,7 @@ Use smooth fills and clean outlines, without grain or distressed paper texture.
 The built-in image tool generated these assets; it does not report its model
 version, so no specific model version is claimed.
 
-Exports for the launch are a 200×200 PNG App/README icon, a 1280×640 JPEG
+Exports are a 512×512 PNG App/README icon, a 1280×640 JPEG
 social preview, and an optimized WebP hero. The PNG and JPEG uploads are each
 under 1 MB. Regenerate the website asset bundle after changing exports with
 `bun src/landing/export-assets.ts`.
@@ -56,6 +97,13 @@ banner as reference: retain the character, wordmark, layout and clean fills;
 add the approved sign/book wording only to the banner; impress code-shaped
 tracks into the sand with ridges and contact shadows. Resize/encoding exports
 use sips and cwebp; they do not change the artwork.
+
+The September 12 avatar edit used the built-in ImageGen tool and the previous
+avatar as its reference. The prompt retained the ivory robot, amber eyes,
+brown hat, brass star and turquoise bandana; removed the circular badge,
+notebook, arms and torso; enlarged the face on a terracotta square; and required
+clean outlines and legibility at 20, 24 and 40 pixels. Verify both rounded-square
+and circular crops whenever replacing the icon. The banner was not regenerated.
 
 ## Operational migration
 
@@ -72,18 +120,3 @@ reviews and stored baselines remain readable. A repository rename does not
 rename the GitHub App registration or the Vercel project. Keep those existing
 resources and credentials when rolling out this change. If the App login is
 renamed separately, pin its immutable `GITHUB_BOT_USER_ID` before that change.
-
-## Name check
-
-On 10 September 2026, exact-name GitHub repository and issue searches, general
-web searches, Reddit search, indexed X searches, and indexed Product Hunt and
-Hacker News searches found no code or PR review product named Slop Sheriff,
-slop-sheriff, or SlopSheriff. Direct X search returned HTTP 403, so its coverage
-is limited to indexed results. `frostney/slop-sheriff` was available when checked.
-
-Related uses were found: Steve Yegge describes a
-[PR Sheriff workflow in Gas Town](https://steve-yegge.medium.com/vibe-maintainer-a2273a841040),
-and Archestra describes an
-[AI sheriff for repository moderation](https://archestra.ai/blog/only-responsible-ai).
-Neither uses the exact proposed name. The username `slopsheriff` appears on
-[AI Slop Hub](https://aislophub.ai/); the owner accepted a username-only collision.

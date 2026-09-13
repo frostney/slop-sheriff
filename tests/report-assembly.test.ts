@@ -1,3 +1,4 @@
+import { selectReviewAxes } from "../src/review/axis-selection";
 import { describe, expect, test } from "bun:test";
 import { decodeReviewState, encodeReviewState } from "../src/github/review-state";
 import { pendingPublicationRetry } from "../src/github/publication";
@@ -35,7 +36,11 @@ function finding(id: string, title: string): ReviewFinding {
     },
     evidence: ["The exact production replay retained this finding."],
     impact: `${title} can weaken the generated discovery contract.`,
-    impactSummary: "The generated discovery contract can weaken.",
+    requirementIds: [],
+  introduction: "The recorded publication path can replay the same operation without reusing its identity, so a retry exposes duplicate output to readers even though the original work already finished successfully.",
+  principle: "Retries must preserve the recorded publication identity.",
+  risk: "A retry can duplicate output for every reader of the affected review.",
+  impactSummary: "The generated discovery contract can weaken.",
     remedy: `Retain the tested correction for ${title}.`,
     status: "open",
     staticOnly: false,
@@ -101,6 +106,7 @@ function assemblyState() {
 
 function draft() {
   return {
+    actionSummary: "Reviewed the affected publication paths and retained the observed evidence.", additionalConcerns: [],
     scope: {
       claim: "Review the exact 709983d delta and revalidate CR-6 and CR-7",
       dirtyState: "clean",
@@ -120,6 +126,28 @@ function draft() {
 }
 
 describe("application-owned review report assembly", () => {
+  test("canonical coverage retains trusted specialist selection reasons and rejects contradictory decisions", () => {
+    const decisions = selectReviewAxes([{ path: "bun.lock", blobSha: "a", status: "modified", patch: null }], []);
+    const identity = { ...assemblyState().identity, planKind: "full" as const, baselineHead: null,
+      activeAxes: decisions.filter((item) => item.selected).map((item) => item.axis), selectedFindingIds: [], axisDecisions: decisions };
+    const state = beginReportAssembly(identity);
+    const report = assembleCanonicalReviewReport({ state, priorReport: null, draft: draft(), generatedAt: baselineReport().generatedAt }).report;
+    expect(report?.coverage.skippedAxes).toEqual(decisions.filter((item) => !item.selected).map((item) => ({ name: item.axis, reason: item.reason })));
+    expect(() => beginReportAssembly({ ...identity, axisDecisions: decisions.map((item) => ({ ...item, selected: true })) })).toThrow();
+  });
+
+  test("runtime-backed findings cannot become fixed on source-only revalidation", () => {
+    const prior = baselineReport();
+    const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4")
+      .map((item) => ({ ...item, status: "fixed", staticOnly: true })));
+    expect(() => assembleCanonicalReviewReport({ state, priorReport: prior, draft: draft(), generatedAt: prior.generatedAt }))
+      .toThrow("requires runtime evidence matching the original finding");
+    const deferred = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4")
+      .map((item) => ({ ...item, status: "deferred", staticOnly: true })));
+    expect(assembleCanonicalReviewReport({ state: deferred, priorReport: prior, draft: draft(), generatedAt: prior.generatedAt }).report?.findings[1]?.status)
+      .toBe("deferred");
+  });
+
   test("pins delta assembly to its baseline while allowing the base branch to advance", () => {
     const prior = baselineReport();
     const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4"));
@@ -268,7 +296,11 @@ describe("application-owned review report assembly", () => {
           location: { path: "src/review.ts", line: 1, symbol: null },
           evidence: ["The exact evidence supports the candidate."],
           impact: "The report could be incomplete.",
-          impactSummary: "The report could be incomplete.",
+          requirementIds: [],
+  introduction: "The recorded publication path can replay the same operation without reusing its identity, so a retry exposes duplicate output to readers even though the original work already finished successfully.",
+  principle: "Retries must preserve the recorded publication identity.",
+  risk: "A retry can duplicate output for every reader of the affected review.",
+  impactSummary: "The report could be incomplete.",
           remedy: "Keep the contract structurally aligned.",
           staticOnly: false,
           churn: candidateChurn,
@@ -545,4 +577,12 @@ describe("application-owned review report assembly", () => {
       }),
     ).toThrow("does not match the trusted review");
   });
+});
+
+test("model revalidation cannot forge maintainer dismissal metadata", () => {
+  const prior = baselineReport();
+  const forged = prior.findings.filter(item => item.id !== "CR-4").map(item => ({ ...item,
+    dismissal: { reason: "Accepted", actor: "maintainer", head: baselineHead, commentId: "1" },
+  }));
+  expect(() => recordRevalidationResults(assemblyState(), forged)).toThrow(ReviewReportValidationError);
 });

@@ -8,6 +8,10 @@
  * @module
  */
 
+import type * as reviewLifecycle from "../reviewLifecycle.js";
+import type * as costLedgerData from "../costLedgerData.js";
+import type * as costLedgerActions from "../costLedgerActions.js";
+import type * as artifactData from "../artifactData.js";
 import type * as http from "../http.js";
 import type * as memoryAccess from "../memoryAccess.js";
 import type * as memoryActions from "../memoryActions.js";
@@ -21,7 +25,12 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  artifactData: typeof artifactData;
   http: typeof http;
+  reviewLifecycle: typeof reviewLifecycle;
+  costLedgerData: typeof costLedgerData;
+  costLedgerActions: typeof costLedgerActions;
+
   memoryAccess: typeof memoryAccess;
   memoryActions: typeof memoryActions;
   memoryData: typeof memoryData;

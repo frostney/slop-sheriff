@@ -47,13 +47,13 @@ test("branding preserves legacy state decoding and publication voice", () => {
     publication: { blocking: false, profile: "balanced", personality: false },
   });
   const plain = encodeReviewState(state);
-  expect(plain).toContain("Slop Sheriff: in progress");
+  expect(plain).toContain("Slop Sheriff: reviewing");
   expect(plain).not.toContain("on patrol");
   expect(decodeReviewState(plain)).toEqual(state);
   expect(decodeReviewState(plain.replace("Slop Sheriff:", "known-good-review:"))).toEqual(state);
   expect(isReviewStateComment(`### A finding\n\n${plain}`)).toBeFalse();
   const cowboy = encodeReviewState({ ...state, publication: { blocking: false, profile: "balanced", personality: true } });
-  expect(cowboy).toContain("on patrol");
+  expect(cowboy).not.toContain("on patrol");
 });
 
 function reviewAuth(
@@ -62,6 +62,11 @@ function reviewAuth(
 ): SessionAuthContext {
   return {
     attributes: {
+      repository: "acme/widget", installation_id: "1", pull_request_number: "53", delivery_id: "delivery-1",
+      [reviewContextAttributes.repositoryId]: "R_widget",
+      [reviewContextAttributes.repositoryCreatedAt]: "0",
+      [reviewContextAttributes.baseSha]: "a".repeat(40),
+      [reviewContextAttributes.headSha]: "b".repeat(40),
       [reviewContextAttributes.event]: event,
       [reviewContextAttributes.plan]: JSON.stringify({ kind }),
     },
@@ -116,8 +121,8 @@ describe("GitHub-owned state and telemetry", () => {
       updatedAt: "2026-08-16T12:00:00.000Z",
     };
     const encoded = encodeReviewState(state);
-    expect(encoded).toContain("## ✅ Slop Sheriff: approved");
-    expect(encoded).toContain("No findings were reported.");
+    expect(encoded).toContain("## ✅ Slop Sheriff: clear");
+    expect(encoded).not.toContain("Patrol complete");
     expect(decodeReviewState(encoded)).toEqual(state);
     expect(decodeReviewState("ordinary comment")).toBeNull();
 
@@ -154,8 +159,8 @@ describe("GitHub-owned state and telemetry", () => {
     const body = encodeReviewState(
       pendingReviewState({ pullRequest: 42, status: "running" }),
     );
-    expect(body).toContain("## ⏳ Slop Sheriff: in progress");
-    expect(body).toContain("The sheriff is on patrol. Review in progress.");
+    expect(body).toContain("## ⏳ Slop Sheriff: reviewing");
+    expect(body).toContain("The current revision is being reviewed.");
     expect(decodeReviewState(body)?.initialFullStatus).toBe("running");
   });
 
@@ -204,6 +209,9 @@ describe("GitHub-owned state and telemetry", () => {
       },
       send: async (_message: unknown, options: ChannelSendOptions) => {
         events.push(`send:${options.mode ?? "conversation"}`);
+        if (options.mode === "task") expect(options).toMatchObject({ state: {
+          slopSheriffReviewContext: { deliveryId: "delivery-1", headSha: "b".repeat(40), repository: "acme/widget" },
+        } });
         return {} as Session;
       },
     })) as unknown as ChannelFrom;
@@ -239,4 +247,14 @@ describe("GitHub-owned state and telemetry", () => {
     ).toBeFalse();
   });
 
+});
+
+test("legacy Check migration survives persisted state and later head transitions", async () => {
+  const { beginCurrentHeadReview } = await import("../src/github/review-progress");
+  const legacy = pendingReviewState({ pullRequest: 43, status: "running" });
+  expect(decodeReviewState(encodeReviewState(legacy))?.legacyChecksMigrated).toBeUndefined();
+  const migrated = { ...legacy, legacyChecksMigrated: true };
+  const restored = decodeReviewState(encodeReviewState(migrated));
+  expect(restored?.legacyChecksMigrated).toBeTrue();
+  expect(beginCurrentHeadReview(restored!, "new-head").legacyChecksMigrated).toBeTrue();
 });

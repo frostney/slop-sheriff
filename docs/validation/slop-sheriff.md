@@ -235,3 +235,105 @@ specialist checks executed successfully in the review sandbox.
 The repair candidate passes `bun run check`: TypeScript, 269 tests, 92 native
 Eve gates, discovery without diagnostics and production build. The recorded
 PR 61 replay preserves all four canonical transitions.
+
+## September 12: production integration of the agreed review design
+
+This revision implements the accepted grilling decisions in the application,
+not just the earlier isolated custom-lane feasibility probe.
+
+- Findings use severity emoji, a severity-only line, a 25–45-word introduction,
+  expandable evidence/principle/remedy, and visible Impact and Risk. The complete
+  comment remains within 200 words; Impact remains within 300 characters.
+- The model receives technically fluent cowboy-robot instructions with theatrical,
+  understated and off presets, plus a trusted-base custom voice guide. No runtime
+  opener table supplies personality. The historical PR42 finding in the landing
+  page uses the same formatter. See [all three examples](../review-examples.md).
+- Trusted configuration creates independently named project lanes in the standard
+  application. Routing, evidence, signed checkpoints, recovery, schemas, reports,
+  memory validation and GitHub Checks recognize their bounded registry. The native
+  Eve fixture exercises two project lanes through the production workflow.
+- Shared base/head requirement inventory includes relevant unchanged and linked
+  documents, DoD and configurable paths. Explicit checklist and normative clauses
+  carry individual evidence obligations. Required unverified checks block completion.
+- New-head state immediately withdraws old merge clearance. Authorized explicit
+  maintainer dismissals preserve attribution, remain distinct from verified fixes,
+  and survive matching later reviews. Model revalidation cannot forge dismissals.
+- Incomplete lockfile changes now receive conservative specialist coverage.
+  Failure continuation reconstructs specialist selection details from the trusted
+  configuration. Browser setup uses the installed native helper's version default.
+
+Validation on Bun 1.4.2, Eve 0.52.5 and AI SDK 7.0.97:
+
+- `bun run check`: both TypeScript projects, 347 tests with 1,860 assertions,
+  102/102 deterministic native Eve runtime gates, clean discovery and production
+  build passed.
+- `bun run replay:pr61`: all four recorded finding transitions preserved.
+- Browser checks verified collapsed/expanded details, keyboard activation, all
+  three voice examples and visible Impact/Risk. The 390px mobile page measured
+  390px document width, with no horizontal overflow.
+- The revised square robot icon was checked at 20, 24, 40, 64 and 128 pixels in
+  square and circular crops. Website asset export contains the new icon.
+
+Rendered evidence: [comments](assets/review-comments.png),
+[mobile landing](assets/landing-mobile.png), [avatar crops](assets/avatar-crops.png).
+
+This round ran no paid model review. Deterministic workflow checks establish the
+application contract, not model quality or comparative speed, token use or cost.
+Production still needs a rollout of this generic capability. The GitHub App icon
+upload requires fresh GitHub security authentication. The previously identified
+sandbox outbound-access finding remains unresolved; this PR is not certified for
+production or merge readiness by these implementation checks.
+
+## September 12: PR43 review cost diagnosis and evidence repair
+
+The failed production attempt beginning at 22:30:55 UTC repeatedly delivered
+base64 image pixels from `src/landing/assets.json` as text. Five lanes consumed
+that payload, and continuation sessions repeated the input. The retained root
+and 12 child streams contain 71 completed model calls totaling $65.938936 in
+SDK-reported cost, plus 19 context-compaction events. The Gateway log window
+22:30–22:40 UTC contains 88 successful requests totaling approximately $66.24485
+at the UI's displayed precision. These are explicitly bounded accounting views,
+not the API key's cumulative spend or a complete reconciliation of the user's
+reported approximately $80 for the latest attempt.
+
+Evidence delivery now replaces recognized PNG, JPEG and WebP pixel strings with
+image type, dimensions, decoded byte count, SHA-256, retained metadata and exact
+source locations. It validates the original patch hash first and preserves the
+raw artifact and non-image changes. Unsupported or malformed containers remain
+verbatim. Visual correctness still requires inspection of the actual rendered
+image; the runtime policy explicitly forbids treating a metadata receipt as
+visual proof or paging encoded pixels back into text context.
+
+An offline replay used PR43 base `35c0e63f5b86643665eeb1733bc559774ffd5942` and
+head `1cdc40ffc87694c117315009bf887f73bfdd7aec`, Git's production diff flags and
+trusted-base file classifications. Both sides use the candidate's specialist
+selection and packet serializer; only the embedded-image projection differs.
+Token counts use `o200k_base` and measure serialized packet delivery, excluding
+model prompts, repeated conversational context, reasoning, later tool reads and
+shared-work envelopes. They are not billable-token or future-cost predictions.
+
+| Evidence | Before | After |
+| --- | ---: | ---: |
+| Embedded-image patch tokens | 697,680 | 1,477 |
+| Seven lanes' packet tokens | 4,287,233 | 803,928 |
+| Seven lanes' packets | 22 | 8 |
+| Completed changed-file entries per lane | 100 | 100 |
+
+No model, reasoning setting, lane selection, coverage obligation or execution
+budget was reduced. Regression checks cover real image formats, metadata,
+non-image changes on the same line, hunk locations, malformed payload retention,
+pagination, replacement-session receipt replay and raw-artifact tampering.
+The policy identity advances to v4 so old policy baselines require a fresh full
+review. In-flight receipts from the old raw view must not be resumed with the
+new view; prepare a fresh review instead.
+
+The accompanying lifecycle repair uses Eve's native terminal `session.failed`
+channel event to finish stale GitHub Checks after runtime retry exhaustion.
+It uses trusted durable dispatch identity and rejects stale heads, superseded
+attempts and completed reviews. Provider error bodies remain private.
+
+No paid canary has run after this repair. The input reduction is verified
+offline; production cost and model-dependent quality parity remain unmeasured.
+`bun run check` passed both TypeScript projects, 360 tests with 1,963 assertions,
+102 native Eve gates, discovery and the production build. The PR61 replay
+preserved the finding transitions across all four recorded runs.

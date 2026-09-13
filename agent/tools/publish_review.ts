@@ -1,3 +1,4 @@
+import { currentReviewReportState } from "../lib/review-report";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { parseReviewConfig } from "../../src/config/review-config";
@@ -30,6 +31,7 @@ export default defineTool({
     return publishPendingReview({
       config,
       context: trusted,
+      staged: currentReviewReportState(ctx.session.auth.current),
       octokit: githubAdapter(trusted.installationId).octokit,
     });
   },

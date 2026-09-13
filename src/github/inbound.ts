@@ -103,6 +103,7 @@ export function planDispatch(input: {
   readonly draft: boolean;
   readonly head: string;
   readonly manualFull?: boolean;
+  readonly reviewPolicyDigest?: string;
   readonly manualFullAuthorized?: boolean;
   readonly patchFiles?: readonly PatchFile[];
   readonly state:
@@ -137,7 +138,7 @@ export function planDispatch(input: {
   const patchFingerprint = input.patchFiles
     ? effectivePatchFingerprint(input.patchFiles)
     : undefined;
-  const plan = planReview({
+  let plan = planReview({
     action: input.action,
     baseline,
     draft: input.draft,
@@ -152,6 +153,10 @@ export function planDispatch(input: {
   });
   const priorBaseline =
     input.state.kind === "valid" ? input.state.state.baseline : null;
+  if (input.reviewPolicyDigest && priorBaseline && priorBaseline.reviewPolicyDigest !== input.reviewPolicyDigest &&
+      (plan.kind === "reuse" || plan.kind === "delta")) {
+    plan = { kind: "full", delaySeconds: 0, reason: "initial", supersedesActiveReview: true };
+  }
   const changedFiles =
     priorBaseline && input.patchFiles
       ? changedEffectiveFiles(

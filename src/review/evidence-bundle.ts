@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ReviewAxis } from "./axes";
-import { reviewAxes } from "./axes";
+import { reviewAxisSchema } from "./axes";
 import { specialistEntryScope } from "./specialist-scope";
+import { projectEmbeddedMediaPatch } from "./embedded-media";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -113,7 +114,7 @@ const reviewEvidenceCursorSchema = z.object({
   characterOffset: z.number().int().nonnegative(),
 });
 
-const reviewEvidenceProgressSchema = z.object({
+export const reviewEvidenceProgressSchema = z.object({
   cursor: reviewEvidenceCursorSchema.nullable(),
   completedEntries: z.array(z.number().int().nonnegative()),
 });
@@ -172,7 +173,7 @@ function reviewEvidenceProgressPath(
   patchFingerprint: string,
   axis: ReviewAxis,
 ): string {
-  return `${reviewEvidenceDirectory(patchFingerprint)}/progress/${z.enum(reviewAxes).parse(axis)}.json`;
+  return `${reviewEvidenceDirectory(patchFingerprint)}/progress/${reviewAxisSchema.parse(axis)}.json`;
 }
 
 function reviewEvidencePacketReceiptPath(
@@ -181,7 +182,7 @@ function reviewEvidencePacketReceiptPath(
   sessionId: string,
 ): string {
   const sessionHash = createHash("sha256").update(sessionId).digest("hex");
-  return `${reviewEvidenceDirectory(patchFingerprint)}/packets/${z.enum(reviewAxes).parse(axis)}-${sessionHash}.json`;
+  return `${reviewEvidenceDirectory(patchFingerprint)}/packets/${reviewAxisSchema.parse(axis)}-${sessionHash}.json`;
 }
 
 export async function resetReviewEvidence(
@@ -234,7 +235,7 @@ export async function writeReviewEvidenceManifest(
 }
 
 export async function readReviewEvidenceManifest(
-  sandbox: ReviewEvidenceSandbox,
+  sandbox: Pick<ReviewEvidenceSandbox, "readTextFile">,
   identity: ReviewEvidenceIdentity,
 ): Promise<ReviewEvidenceManifest> {
   const source = await sandbox.readTextFile({
@@ -288,18 +289,25 @@ export async function readReviewEvidencePatch(
   if (!entry) {
     throw new Error(`No included review patch exists for ${input.path}`);
   }
-  const source = await sandbox.readTextFile({
+  const rawSource = await sandbox.readTextFile({
     path: `${reviewEvidenceDirectory(manifest.patchFingerprint)}/${entry.patchFile}`,
   });
-  if (source === null) {
+  if (rawSource === null) {
     throw new Error(`Prepared review patch is unavailable for ${input.path}`);
   }
-  const observedSha256 = createHash("sha256").update(source).digest("hex");
+  const observedSha256 = createHash("sha256").update(rawSource).digest("hex");
   if (observedSha256 !== entry.patchSha256) {
     throw new Error(
       `Prepared review patch failed integrity validation for ${input.path}`,
     );
   }
+  // Validate the original artifact before deriving a compact display view.
+  // Cursors address this deterministic view; the manifest/hash still identify
+  // the untouched raw diff, available for exact source and image inspection.
+  const source = projectEmbeddedMediaPatch(rawSource, {
+    path: entry.path,
+    rawPatchPath: `${reviewEvidenceDirectory(manifest.patchFingerprint)}/${entry.patchFile}`,
+  });
   const cursor = z
     .number()
     .int()
@@ -335,7 +343,7 @@ export async function readReviewEvidencePatch(
 }
 
 export async function readReviewEvidenceProgress(
-  sandbox: ReviewEvidenceSandbox,
+  sandbox: Pick<ReviewEvidenceSandbox, "readTextFile">,
   manifest: ReviewEvidenceManifest,
   axis: ReviewAxis,
 ): Promise<ReviewEvidenceProgress> {

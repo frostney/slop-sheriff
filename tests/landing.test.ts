@@ -1,9 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
+import { findingBodyHtml } from "../src/github/review-presentation";
+import { findingReactions } from "../src/branding";
+import { exampleFinding, exampleFindingSource } from "../src/landing/example-finding";
 import { landingPage } from "../src/landing/page";
 import { landingPaths, landingResponse } from "../src/landing/routes";
 
-const canonicalOrigin = "https://slop-sheriff.vercel.app";
+const canonicalOrigin = "https://slop-sheriff.dev";
 
 function request(path: string, method = "GET"): Request {
   return new Request(`${canonicalOrigin}${path}`, {
@@ -23,8 +26,15 @@ describe("public landing routes", () => {
     expect(html).toContain(`<meta property="og:image" content="${canonicalOrigin}/assets/slop-sheriff-social.jpg">`);
     expect(html).toContain('id="install"');
     expect(html).toContain("/docs/install.md");
-    expect(html).toContain("Synthetic example");
-    expect(html).toContain("<details>");
+    expect(html).toContain(exampleFindingSource);
+    expect(html).toContain(findingBodyHtml(exampleFinding));
+    expect(html).toContain("subsequently fixed");
+    expect(html).not.toContain("Synthetic example");
+    expect(html).not.toContain("invoice");
+    expect(html).toContain("<summary>Evidence and recommended change</summary>");
+    const visibleText = html.split("<body>")[1]!.replace(/<details>[\s\S]*?<\/details>/g, " ").replace(/<[^>]+>/g, " ").replace(/&[^;]+;/g, " ");
+    expect(visibleText.trim().split(/\s+/u).length).toBeGreaterThanOrEqual(310);
+    expect(visibleText.trim().split(/\s+/u).length).toBeLessThanOrEqual(350);
     expect(html).not.toContain("<script");
     expect(html).not.toContain("untrusted-preview.example");
     expect(html).not.toContain("injected.example");
@@ -58,9 +68,9 @@ describe("public landing routes", () => {
   });
 
   test("production aliases stay noindex and forwarded hosts cannot grant indexing", async () => {
-    for (const hostname of ["known-good-review.vercel.app", "candidate.vercel.app", "127.0.0.1", "slop-sheriff.vercel.app.attacker.example"]) {
+    for (const hostname of ["slop-sheriff.vercel.app", "www.slop-sheriff.dev", "known-good-review.vercel.app", "candidate.vercel.app", "127.0.0.1", "slop-sheriff.dev.attacker.example"]) {
       const response = landingResponse(new Request(`https://${hostname}/`, {
-        headers: { "x-forwarded-host": "slop-sheriff.vercel.app" },
+        headers: { "x-forwarded-host": "slop-sheriff.dev" },
       }), "production");
       expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
       const html = await response.text();
@@ -97,6 +107,7 @@ describe("public landing routes", () => {
       ["slop-sheriff-hero.webp", "image/webp"],
       ["slop-sheriff-icon.png", "image/png"],
       ["slop-sheriff-social.jpg", "image/jpeg"],
+      ...Object.values(findingReactions).map(({ filename }) => [filename, "image/png"] as const),
     ] as const) {
       const source = await readFile(new URL(`../docs/assets/${filename}`, import.meta.url));
       const response = landingResponse(request(`/assets/${filename}`), "production");

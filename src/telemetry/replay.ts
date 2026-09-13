@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reviewAxes } from "../review/axes";
+import { reviewAxisSchema } from "../review/axes";
 import {
   commonWorkKinds,
   stableCommonWorkId,
@@ -19,7 +19,7 @@ const usageSchema = z.object({
 
 const workerSchema = z.object({
   role: z.enum(["axis", "revalidation"]),
-  axis: z.enum(reviewAxes).nullable(),
+  axis: reviewAxisSchema.nullable(),
   attempt: z.number().int().nonnegative(),
   startedAt: timestampSchema,
   completedAt: timestampSchema,
@@ -44,7 +44,7 @@ const replayRunSchema = z.object({
   }),
   laneCheckpoints: z.array(
     z.object({
-      axis: z.enum(reviewAxes),
+      axis: reviewAxisSchema,
       attempt: z.number().int().nonnegative(),
       status: z.literal("complete"),
       reviewedEntries: z.array(z.number().int().nonnegative()),

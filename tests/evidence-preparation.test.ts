@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RuntimeSandboxSession } from "eve/sandbox";
@@ -10,6 +10,7 @@ import { parseReviewConfig } from "../src/config/review-config";
 import { readLaneReviewEvidencePacket } from "../src/review/lane-evidence";
 import { reviewAxes } from "../src/review/axes";
 import { digestCommonWorkValue } from "../src/review/common-work";
+import { localWorkspaceReceiptPath } from "../src/review/physical-workspace";
 
 async function git(cwd: string, ...args: string[]) {
   const child = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -24,10 +25,13 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
   const root = await mkdtemp(join(tmpdir(), "kgr-evidence-"));
   const source = join(root, "source");
   const workspace = join(root, "workspace");
+  const acquisition = join(root, "acquisition");
   let tokenRequests = 0;
+  let environmentInventories = 0;
   try {
     await mkdir(source);
     await mkdir(workspace);
+    await mkdir(acquisition);
     await git(source, "init", "--quiet");
     await git(source, "config", "user.email", "fixture@example.test");
     await git(source, "config", "user.name", "Fixture");
@@ -64,10 +68,11 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
         else for (const key of files.keys()) if (key.startsWith(path)) files.delete(key);
       },
       async readBinaryFile() { return null; },
-      async writeBinaryFile() { throw new Error("Fixture has no archives"); },
+      async writeBinaryFile({ path, content }: { path: string; content: Buffer }) { await writeFile(path.replace("/tmp/review-repository.tar", join(root, "review-repository.tar")), content); },
       async setNetworkPolicy() {},
       async run({ command }: { command: string }) {
-        const localCommand = command.replaceAll("/workspace", workspace)
+        if (command === "cd /workspace && git ls-files -z") environmentInventories += 1;
+        const localCommand = (process.platform === "darwin" ? command.replace("stat -c '%s'", "stat -f '%z'") : command).replaceAll("/tmp/review-repository.tar", join(root, "review-repository.tar")).replaceAll("/workspace", workspace)
           .replaceAll("https://github.com/acme/widget.git", source);
         const child = Bun.spawn(["sh", "-c", localCommand], {
           cwd: workspace, stdout: "pipe", stderr: "pipe",
@@ -83,11 +88,16 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
       repositoryId: "R_widget", repositoryDatabaseId: 1, repositoryCreatedAt: 0,
       pullRequest: 61, baseSha, headSha, patchFingerprint: "a".repeat(64),
     };
-    const ledger = await prepareReviewEvidence(
+    const preparing = prepareReviewEvidence(
       runtime as unknown as RuntimeSandboxSession, trusted,
       paths.map((path) => ({ path, status: "modified" })), {
         planKind: "full", config: parseReviewConfig(null),
         workspaceDependencies: {
+          createAcquisitionSandbox: async () => ({ session: {
+            ...runtime,
+            run: ({ command }: { command: string }) => runtime.run({ command: command.replaceAll("/workspace", acquisition).replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar")) }),
+            readBinaryFile: async ({ path }: { path: string }) => readFile(path.replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar"))),
+          } as unknown as RuntimeSandboxSession, delete: async () => {} }),
           getMergeBase: async (context) => git(source, "merge-base", context.baseSha, context.headSha),
           getInstallationToken: async () => { tokenRequests += 1; return "fixture-token"; },
         },
@@ -98,6 +108,24 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
         }),
       },
     );
+    const concurrent = prepareReviewEvidence(runtime as unknown as RuntimeSandboxSession, trusted,
+      paths.map((path) => ({ path, status: "modified" })), {
+        planKind: "full", config: parseReviewConfig(null),
+        collectMemory: async () => { throw new Error("Concurrent preparation recollected memory"); },
+        collectGitHubEvidence: async () => { throw new Error("Concurrent preparation recollected GitHub evidence"); },
+        workspaceDependencies: {
+          createAcquisitionSandbox: async () => ({ session: {
+            ...runtime,
+            run: ({ command }: { command: string }) => runtime.run({ command: command.replaceAll("/workspace", acquisition).replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar")) }),
+            readBinaryFile: async ({ path }: { path: string }) => readFile(path.replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar"))),
+          } as unknown as RuntimeSandboxSession, delete: async () => {} }),
+          getMergeBase: async () => { throw new Error("Concurrent preparation fetched checkout"); },
+          getInstallationToken: async () => { throw new Error("Concurrent preparation requested token"); },
+        },
+      });
+    const [ledger, concurrentLedger] = await Promise.all([preparing, concurrent]);
+    expect(concurrentLedger).toEqual(ledger);
+    expect(ledger.components.capabilityDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(tokenRequests).toBe(1);
     const manifest = await readReviewEvidenceManifest(runtime, trusted);
     expect(manifest.entries.find((entry) => entry.path === "src/generated.ts"))
@@ -129,8 +157,46 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
       paths.map((path) => ({ path, status: "modified" })), {
         planKind: "full", config: parseReviewConfig(null),
         collectMemory: unexpectedCollection, collectGitHubEvidence: unexpectedCollection,
-        workspaceDependencies: { getMergeBase: unexpectedCollection, getInstallationToken: unexpectedCollection },
+        workspaceDependencies: {
+          createAcquisitionSandbox: async () => ({ session: {
+            ...runtime,
+            run: ({ command }: { command: string }) => runtime.run({ command: command.replaceAll("/workspace", acquisition).replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar")) }),
+            readBinaryFile: async ({ path }: { path: string }) => readFile(path.replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar"))),
+          } as unknown as RuntimeSandboxSession, delete: async () => {} }), getMergeBase: unexpectedCollection, getInstallationToken: unexpectedCollection },
       })).toEqual(ledger);
+    expect(environmentInventories).toBe(1);
+    // Keep the durable evidence, lose the VM's checkout and its local-only receipt.
+    const savedEvidence = new Map([...files].filter(([path]) => path !== localWorkspaceReceiptPath));
+    await rm(workspace, { recursive: true, force: true });
+    await mkdir(workspace);
+    await rm(acquisition, { recursive: true, force: true });
+    await mkdir(acquisition);
+    files.delete(localWorkspaceReceiptPath);
+    const restoredRuntime = { ...runtime, id: "replacement-vm" } as unknown as RuntimeSandboxSession;
+    const restorationInput = {
+      planKind: "full" as const, config: parseReviewConfig(null),
+      collectMemory: unexpectedCollection, collectGitHubEvidence: unexpectedCollection,
+      workspaceDependencies: {
+        createAcquisitionSandbox: async () => ({ session: {
+          ...runtime,
+          run: ({ command }: { command: string }) => runtime.run({ command: command.replaceAll("/workspace", acquisition).replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar")) }),
+          readBinaryFile: async ({ path }: { path: string }) => readFile(path.replaceAll("/tmp/review-repository.tar", join(root, "acquired-repository.tar"))),
+        } as unknown as RuntimeSandboxSession, delete: async () => {} }),
+        getMergeBase: async () => mergeBaseSha,
+        getInstallationToken: async () => { tokenRequests += 1; return "fixture-token"; },
+      },
+    };
+    expect(await prepareReviewEvidence(restoredRuntime, trusted,
+      paths.map(path => ({ path, status: "modified" })), restorationInput)).toEqual(ledger);
+    expect(await git(workspace, "rev-parse", "HEAD")).toBe(headSha);
+    expect(await readFile(join(workspace, paths[0]!), "utf8")).toBe("changed-0\n");
+    expect(environmentInventories).toBe(2);
+    expect(tokenRequests).toBe(2);
+    expect(new Map([...files].filter(([path]) => path !== localWorkspaceReceiptPath))).toEqual(savedEvidence);
+    expect(await prepareReviewEvidence(restoredRuntime, trusted,
+      paths.map(path => ({ path, status: "modified" })), restorationInput)).toEqual(ledger);
+    expect(environmentInventories).toBe(2);
+    expect(tokenRequests).toBe(2);
     const changedManifest = structuredClone(manifest);
     changedManifest.entries[0]!.patchTokens += 1;
     await expect(readLaneReviewEvidencePacket(runtime, ledger.identity, changedManifest,

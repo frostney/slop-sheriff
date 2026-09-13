@@ -13,6 +13,8 @@ import {
   type ExactHeadGitHubEvidence,
 } from "./github-evidence";
 
+import { requirementSourceSchema, type RequirementSource } from "./requirements";
+
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -58,6 +60,7 @@ const reviewEvidenceLedgerPayloadSchema = z.object({
   probes: z.array(commonEvidenceProbeSchema),
   gaps: z.array(evidenceGapSchema),
   commonWork: commonReviewWorkSchema,
+  requirements: z.array(requirementSourceSchema).optional(),
 });
 
 export const reviewEvidenceLedgerSchema = reviewEvidenceLedgerPayloadSchema
@@ -122,6 +125,7 @@ export function assembleReviewEvidenceLedger(input: {
   readonly identity: ReviewEvidenceLedgerIdentity;
   readonly manifest: ReviewEvidenceManifest;
   readonly probes: readonly CommonEvidenceProbe[];
+  readonly requirements?: readonly RequirementSource[];
 }): ReviewEvidenceLedger {
   const manifest = reviewEvidenceManifestSchema.parse(input.manifest);
   const identity = reviewEvidenceLedgerIdentitySchema.parse(input.identity);
@@ -166,6 +170,7 @@ export function assembleReviewEvidenceLedger(input: {
     probes,
     gaps,
     commonWork,
+    requirements: input.requirements ?? [],
   });
   return reviewEvidenceLedgerSchema.parse({
     ...payload,

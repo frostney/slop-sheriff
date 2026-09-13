@@ -9,7 +9,7 @@ GitHub channel, and publishes aggregate and per-axis Checks, one visible result
 summary, and stable inline finding threads through the official Chat SDK GitHub
 adapter's typed Octokit surface.
 
-[Meet the sheriff](https://slop-sheriff.vercel.app) · [Self-hosting instructions](docs/install.md)
+[Meet the sheriff](https://slop-sheriff.dev) · [Self-hosting instructions](docs/install.md)
 
 Run your own sheriff on your own Vercel, Gateway and Convex accounts. There is
 no public hosted installation service.
@@ -57,12 +57,12 @@ flowchart TD
   A publication-only continuation retries GitHub directly without a model or
   completed review work.
 
-One GitHub summary comment holds the authoritative versioned review state and
+One GitHub summary comment holds the published versioned review state and
 complete v2 findings artifact. Large state is compressed and, when needed, split
-into immutable attachments saved before the summary pointer changes. Convex stores advisory,
-repository-scoped cross-PR memory
-through `@convex-dev/rag`; it never owns the current verdict, baseline, or
-finding status. Recent matches remain individual while older matches collapse
+into immutable attachments saved before the summary pointer changes. Dedicated
+Convex ledgers own admission, execution recovery, signed evidence, publication
+outboxes and cost accounting. Separate cross-PR memory through `@convex-dev/rag`
+is advisory; it cannot change the verdict, baseline or finding status. Recent matches remain individual while older matches collapse
 to bounded semantic-cluster representatives after the repository has enough
 review history. The GitHub state allows the next webhook to distinguish the
 first review, an exact delta, a semantic no-op, and a lost baseline.
@@ -113,22 +113,34 @@ agents:
   scout: openai/gpt-5.6-luna
 ```
 
-Set `personality: false` for plain review language. The default cowboy voice
-changes presentation only; it never changes evidence, severity, coverage, or
-blocking policy. Each finding has an impact summary of at most 300 characters
-and expandable full analysis. Existing reports retain their full impact and
-finding identity. See the [voice and visual guide](docs/brand.md).
+Choose `voice: theatrical` (C, default), `voice: understated` (B), or
+`voice: off`. `personality: false` also selects plain language. A trusted-base
+`voiceGuide: docs/review-voice.md` can customize style without changing evidence,
+severity, or the recommendation. Each finding has a 25 to 45 word introduction,
+expandable evidence, applicable principle and fix direction, then visible Impact
+(at most 300 characters) and one-sentence Risk. The whole comment stays within
+200 words. With personality enabled, a compact robot portrait reacts to the
+finding: alarmed for Blocking, skeptical for Important, inspired for Improvement,
+and a cheeky wink for Nitpick. Both `voice: off` and `personality: false` hide it.
+These are reusable images, with no image-generation calls during reviews.
+See the [voice and visual guide](docs/brand.md).
 The [validation record](docs/validation/slop-sheriff.md) includes comment
 previews, policy measurements and the remaining real-model comparison work.
 
-The core reuse/design, claim/specification, and engineering-quality lanes
-remain active. The spec-testing lane checks explicit requirements through real
-interfaces. A conditional test-health lane checks affected tests as frozen
+One broad core covers correctness, claims, reuse and test value. Triage selects
+specialists from changed content, with reasons retained in coverage: behavior
+changes get real-interface specification checks; public contracts, dependencies
+and consequential risks receive focused additional review. Unknown or incomplete
+patches widen coverage conservatively. A conditional test-health lane checks affected tests as frozen
 consumer contracts: public outcomes, failure sensitivity and tolerance of
 internal refactors. Discoverability is conditional on public web content; writing
-quality activates for files that may contain authored prose, strings or
-comments. Specialist reports classify their scope and preserve failed and
-unverified results. An unavailable runtime never becomes a behavioral pass.
+quality activates for changed authored prose, strings or substantive comments. Specialist reports classify their scope and preserve failed and
+unverified results. Supported defects from every lane are posted inline;
+only actionable unrelated existing concerns appear in the main summary details. Before dispatch,
+shared setup installs declared toolchains, locked dependencies and needed browser
+components. Setup failure prevents review completion. Real external requirements
+remain explicit limitations. Fixed bot threads receive a brief acknowledgement
+and commit link, then resolve only with evidence matching the original finding.
 
 The former `agents.commenter` key remains accepted for configuration
 compatibility but is ignored; publication formatting is deterministic.
@@ -244,7 +256,7 @@ reviews. Missing or malformed keys reject review admission.
 
 Give Convex its AI Gateway key and
 the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
-same token. The app needs repository metadata read, contents read, Actions read,
+same token. The app needs repository metadata read, contents write, Actions read,
 pull requests read/write, issues read/write, and checks read/write. Forward
 `pull_request`, `issue_comment`, `installation`, and
 `installation_repositories` events through Connect to `/eve/v1/github`.
@@ -289,5 +301,6 @@ state markers remain compatible. Renaming the GitHub App registration is a
 separate operational change; keep `GITHUB_BOT_USER_ID` pinned to that App
 when changing its login. See [brand migration](docs/brand.md#operational-migration).
 
-See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
+See [project lane authoring](docs/custom-lanes.md), [requirements and documentation checks](docs/requirements.md),
+[comment examples in all three voice modes](docs/review-examples.md), [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

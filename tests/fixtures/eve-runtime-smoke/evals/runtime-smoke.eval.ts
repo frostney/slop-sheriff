@@ -3,7 +3,7 @@ import { equals, includes } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Checks public GET/HEAD responses through compiled Eve routes and routed root-copy child streaming through production instrumentation.",
+    "Checks compiled public routes, routed root-copy and project-lane execution, structured-output recovery, workflow admission, and production instrumentation.",
   tags: ["mock-model", "runtime-smoke"],
   async test(t) {
     // Exercise production channel discovery and Nitro's compiled route names.
@@ -33,6 +33,19 @@ export default defineEval({
     }
     for (const method of ["GET", "HEAD"]) {
       t.check((await t.target.fetch("/robots{.txt}", { method })).status, equals(404));
+    }
+
+    const projectSession = t.newSession();
+    const projectTurn = await projectSession.send("KGR-EVAL-AUTHORED-ROOT KGR-EVAL-PROJECT-LANES");
+    projectTurn.expectOk();
+    projectTurn.messageIncludes("AUTHORED-REVIEW-COMPLETE");
+    projectTurn.noFailedActions();
+    const projectChildren = projectTurn.events.filter((event) => event.type === "subagent.called");
+    await t.require(projectChildren.length, equals(2));
+    for (const event of projectChildren) {
+      const child = await t.target.attachSession(event.data.childSessionId);
+      child.succeeded();
+      child.calledTool("fixture_checkpoint", { count: 1 });
     }
 
     const budgetSession = t.newSession();
@@ -105,6 +118,18 @@ export default defineEval({
       const child = await t.target.attachSession(event.data.childSessionId);
       child.succeeded();
     }
+
+    const scoutRecoverySession = t.newSession();
+    const recoveredScout = await scoutRecoverySession.send("KGR-EVAL-AUTHORED-ROOT KGR-EVAL-SCOUT-PROSE");
+    recoveredScout.expectOk();
+    recoveredScout.messageIncludes("AUTHORED-REVIEW-COMPLETE");
+    recoveredScout.noFailedActions();
+    const recoveryChildren = recoveredScout.events.filter((event) => event.type === "subagent.called");
+    if (recoveryChildren.length !== 6) throw new Error("Expected one failed scout, one receipt retry, and no replacement completed lanes");
+    const retriedScout = recoveryChildren.find((event) => event.data.callId.endsWith(":receipt-retry"));
+    if (!retriedScout) throw new Error("Scout output failure never reached application recovery");
+    const retrySession = await t.target.attachSession(retriedScout.data.childSessionId);
+    retrySession.succeeded();
 
     const repeated = await t.send("KGR-EVAL-AUTHORED-REPEAT");
     repeated.messageIncludes("AUTHORED-REPLAY-COMPLETE");

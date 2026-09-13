@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { SandboxNetworkPolicy } from "eve/sandbox";
+import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
 import {
-  githubOnlyNetworkPolicy,
+  reviewNetworkPolicy,
   prepareReviewWorkspace,
 } from "../src/github/review-workspace";
 import type { TrustedGitHubContext } from "../src/github/trusted-context";
@@ -29,11 +29,14 @@ function sandbox(options: { readonly fetchExitCode?: number } = {}) {
     policies,
     removed,
     runtime: {
+      async writeBinaryFile() {},
+      async readBinaryFile() { return Buffer.from("repository artifact"); },
       async removePath(input: { readonly path: string }) {
         removed.push(input.path);
       },
       async run({ command }: { readonly command: string }) {
         commands.push(command);
+        if (command.startsWith("split ")) return { exitCode: 0, stdout: "19", stderr: "" };
         if (command.includes(" fetch ")) {
           return {
             exitCode: options.fetchExitCode ?? 0,
@@ -73,7 +76,10 @@ describe("review workspace preparation", () => {
 
   test("fetches and checks out the exact pull request without exposing its token", async () => {
     const observed = sandbox();
+    const acquisition = sandbox();
+    let deleted = false;
     await prepareReviewWorkspace(context, observed.runtime, {
+      createAcquisitionSandbox: async () => ({ session: acquisition.runtime as unknown as SandboxSession, delete: async () => { deleted = true; } }),
       getMergeBase: async () => baseSha,
       getInstallationToken: async (installationId) => {
         expect(installationId).toBe(41);
@@ -82,12 +88,15 @@ describe("review workspace preparation", () => {
     });
 
     expect(observed.removed).toEqual([".git"]);
-    expect(observed.policies).toHaveLength(2);
-    expect(observed.policies.at(-1)).toEqual(githubOnlyNetworkPolicy);
+    expect(observed.policies).toEqual(["deny-all"]);
+    expect(acquisition.policies).toHaveLength(2);
+    expect(deleted).toBe(true);
+    expect(observed.policies.at(-1)).toEqual(reviewNetworkPolicy);
     expect(observed.commands.join("\n")).not.toContain(
       "secret-installation-token",
     );
-    expect(observed.commands).toEqual([
+    expect([...acquisition.commands, ...observed.commands].filter((command) => !command.startsWith("rm -f") && !command.startsWith("cat ") && !command.startsWith("split "))).toEqual([
+      expect.stringContaining("mkdir -p /workspace"),
       expect.stringContaining("git init --quiet /workspace"),
       expect.stringContaining(
         "remote add origin 'https://github.com/frostney/pascal-mcp-sdk.git'",
@@ -98,20 +107,28 @@ describe("review workspace preparation", () => {
       expect.stringContaining("refs/known-good-review/base^{commit}"),
       expect.stringContaining("refs/known-good-review/head^{commit}"),
       expect.stringContaining("refs/known-good-review/merge-base^{commit}"),
+      expect.stringContaining("tar -C /workspace -cf"),
+      expect.stringContaining("tar -C /workspace -xf"),
       expect.stringContaining("checkout --detach --force"),
-      expect.stringContaining("clean -ffd"),
+      expect.stringContaining("clean -ffdx"),
     ]);
   });
 
   test("removes brokered credentials when the fetch fails", async () => {
-    const observed = sandbox({ fetchExitCode: 1 });
+    const observed = sandbox();
+    const acquisition = sandbox({ fetchExitCode: 1 });
+    let deleted = false;
     await expect(
       prepareReviewWorkspace(context, observed.runtime, {
+        createAcquisitionSandbox: async () => ({ session: acquisition.runtime as unknown as SandboxSession, delete: async () => { deleted = true; } }),
         getMergeBase: async () => baseSha,
         getInstallationToken: async () => "secret-installation-token",
       }),
     ).rejects.toThrow("Trusted pull request fetch failed");
-    expect(observed.policies).toHaveLength(2);
-    expect(observed.policies.at(-1)).toEqual(githubOnlyNetworkPolicy);
+    expect(observed.policies).toEqual(["deny-all"]);
+    expect(acquisition.policies).toHaveLength(2);
+    expect(acquisition.policies.at(-1)).toBe("deny-all");
+    expect(deleted).toBe(true);
+    expect(observed.policies.at(-1)).toEqual(reviewNetworkPolicy);
   });
 });
