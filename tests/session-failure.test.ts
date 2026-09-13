@@ -4,6 +4,9 @@ import { githubChannel } from "eve/channels/github";
 import { callAdapterEventHandler } from "../node_modules/eve/dist/src/channel/adapter.js";
 import { handleReviewSessionFailure } from "../agent/lib/session-failure";
 import * as publication from "../src/github/publication";
+import { deliverLifecyclePublication } from "../agent/lib/lifecycle-publication";
+import * as adapters from "../src/github/chat-adapter";
+import type { LifecycleJob } from "../src/lifecycle/contracts";
 import { encodeReviewState, decodeReviewState } from "../src/github/review-state";
 
 const context = { installationId: 1, owner: "acme", repo: "widget", repository: "acme/widget", repositoryId: "R_widget",
@@ -41,11 +44,11 @@ test("API key rejection calls for usage investigation without prescribing a high
   } finally { publish.mockRestore(); }
 });
 
-test.each(["current", "new-head", "new-attempt", "completed", "draft", "closed"])("terminal publication protects current review ownership: %s", async (scenario) => {
+test.each(["current", "delivered-check-stale-summary", "new-head", "new-attempt", "completed", "draft", "closed"])("terminal publication protects current review ownership: %s", async (scenario) => {
   const writes: Record<string, unknown>[] = [];
   let body = encodeReviewState({ schemaVersion: 2, app: "known-good-review", pullRequest: 7,
     initialFullStatus: "running", currentHead: context.headSha, baseline: null, updatedAt: "2026-09-12T00:00:00Z" });
-  const check = { id: 10, name: "slop-sheriff", status: scenario === "completed" ? "completed" : "in_progress", conclusion: scenario === "completed" ? "success" : null,
+  const check = { id: 10, name: "slop-sheriff", status: ["completed", "delivered-check-stale-summary"].includes(scenario) ? "completed" : "in_progress", conclusion: scenario === "completed" ? "success" : scenario === "delivered-check-stale-summary" ? "action_required" : null,
     external_id: publication.activeReviewExternalId({ ...context, deliveryId: scenario === "new-attempt" ? "delivery-2" : context.deliveryId }, { kind: "full", reason: "manual" }) };
   const axis = { id: 11, name: "slop-sheriff / engineering-quality", status: "in_progress" };
   const octokit = new Octokit({ request: { fetch: async (resource: Request | string | URL, init?: RequestInit) => {
@@ -58,18 +61,28 @@ test.each(["current", "new-head", "new-attempt", "completed", "draft", "closed"]
       if (url.endsWith("/check-runs/11")) Object.assign(axis, payload);
       return Response.json({ id: 10 });
     }
+    if (url.endsWith("/repos/acme/widget")) return Response.json({ node_id: context.repositoryId });
     if (url.includes("/pulls/")) return Response.json({ state: scenario === "closed" ? "closed" : "open", draft: scenario === "draft", base: { sha: context.baseSha }, head: { sha: scenario === "new-head" ? "c".repeat(40) : context.headSha } });
     if (url.includes("/comments")) return Response.json([{ id: 12, user: { id: 123, type: "Bot", login: "known-good-review[bot]" }, body }]);
     return Response.json({ check_runs: [check, axis] });
   } } });
-  await publication.publishSessionFailure({ context, octokit, message: "Gateway credit exhausted" });
-  if (scenario === "current") {
+  const deliver = async () => {
+    if (scenario !== "delivered-check-stale-summary") return publication.publishSessionFailure({ context, octokit, message: "Gateway credit exhausted" });
+    const adapter = spyOn(adapters, "githubAdapter").mockReturnValue({ octokit } as ReturnType<typeof adapters.githubAdapter>);
+    try {
+      await deliverLifecyclePublication({ repositoryId: context.repositoryId, attemptId: context.deliveryId,
+        publicationKind: "failure", publication: JSON.stringify({ context, message: "Gateway credit exhausted" }),
+      } as LifecycleJob);
+    } finally { adapter.mockRestore(); }
+  };
+  await deliver();
+  if (["current", "delivered-check-stale-summary"].includes(scenario)) {
     expect(check).toMatchObject({ status: "completed", conclusion: "action_required" });
     expect(axis).toMatchObject({ status: "completed", conclusion: "action_required" });
     expect(decodeReviewState(body)).toMatchObject({ initialFullStatus: "failed", currentHead: context.headSha });
     expect(body).toContain("incomplete");
     const count = writes.length;
-    await publication.publishSessionFailure({ context, octokit, message: "Gateway credit exhausted" });
+    await deliver();
     expect(writes).toHaveLength(count);
   } else expect(writes).toHaveLength(0);
 });

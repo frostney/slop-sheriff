@@ -17,3 +17,27 @@ test("new durable admission retires eight older owned Checks and leaves unrelate
   expect(await retireLegacyReviewChecks({ context, octokit, previousHead: "old-head" })).toBe(8);
   expect(writes.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 });
+
+
+test("legacy failure without a saved current head discovers PR commits and retires only owned unfinished checks", async () => {
+  const writes: number[] = [];
+  const reads: string[] = [];
+  const octokit = new Octokit({ request: { fetch: async (url: Request | URL | string, init?: RequestInit) => {
+    const path = String(url); reads.push(path);
+    if (init?.method === "PATCH") { writes.push(Number(path.split("/").at(-1))); return Response.json({}); }
+    let data: unknown;
+    if (path.includes("/pulls/43/commits")) data = [{ sha: "base" }, { sha: "lost-head" }, { sha: "new-head" }];
+    else if (path.includes("new-head")) data = { total_count: 1, check_runs: [{ id: 100, name: "slop-sheriff", status: "in_progress", external_id: "known-good-review:43:base:new-head:full:initial:new-attempt", app: { id: 123 } }] };
+    else if (path.includes("lost-head")) data = { total_count: 3, check_runs: [
+      { id: 1, name: "slop-sheriff", status: "in_progress", external_id: "known-good-review:43:base:lost-head:full:manual", app: { id: 123 } },
+      { id: 2, name: "slop-sheriff / test-health", status: "in_progress", external_id: "slop-sheriff / test-health:43:lost-head", app: { id: 123 } },
+      { id: 3, name: "slop-sheriff", status: "in_progress", external_id: "known-good-review:44:base:lost-head:full:manual", app: { id: 123 } },
+    ] };
+    else data = { total_count: 0, check_runs: [] };
+    const response = Response.json(data); Object.defineProperty(response, "url", { value: path }); return response;
+  } } });
+  const context = { deliveryId: "new-attempt", owner: "acme", repo: "repo", repository: "acme/repo", pullRequest: 43, headSha: "new-head" } as TrustedGitHubContext;
+  expect(await retireLegacyReviewChecks({ context, octokit, discoverLegacyHeads: true })).toBe(2);
+  expect(writes).toEqual([1, 2]);
+  expect(reads.filter(path => path.includes("/pulls/43/commits"))).toHaveLength(1);
+});

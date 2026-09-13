@@ -8,6 +8,7 @@ import { parsePullRequestFiles } from "./inbound";
 import type { ReviewConfig } from "../config/review-config";
 import {
   decodeReviewState,
+  pendingReviewState,
   prepareReviewStateComments,
   reviewStateCommentLimit,
   isReviewStateComment,
@@ -1320,6 +1321,7 @@ export async function publishReview(input: {
     pullRequest: input.context.pullRequest,
     initialFullStatus: "completed",
     currentHead: input.context.headSha,
+    ...(lifecycleConfigured() ? { legacyChecksMigrated: true } : {}),
     publication: config,
     baseline: {
       head: input.context.headSha,
@@ -1461,6 +1463,7 @@ export async function publishSessionFailure(input: {
   readonly context: TrustedGitHubContext;
   readonly message: string;
   readonly octokit: OctokitClient;
+  readonly durableDelivery?: boolean;
 }): Promise<void> {
   input = { ...input, octokit: fencePublicationWrites(input.octokit, input.context) };
   await assertReviewOwnership(input.context);
@@ -1470,11 +1473,12 @@ export async function publishSessionFailure(input: {
   if (pr.state !== "open" || pr.draft || pr.base.sha !== context.baseSha || pr.head.sha !== context.headSha) return;
   const check = await latestCheck(octokit, context);
   const review = parseActiveReviewExternalId(check?.external_id, context);
-  if (!review || check?.status === "completed" || check?.external_id !== activeReviewExternalId(context, review)) return;
+  if (!input.durableDelivery && (!review || check?.status === "completed" || check?.external_id !== activeReviewExternalId(context, review))) return;
+  if (input.durableDelivery && check?.status === "completed" && check.conclusion !== "action_required") return;
   const state = await readLatestReviewState(octokit, context);
-  if (state) {
+  if (!state || state.currentHead !== context.headSha || state.initialFullStatus !== "failed") {
     await writeReviewState(octokit, context, {
-      ...state, currentHead: context.headSha, initialFullStatus: "failed",
+      ...(state ?? pendingReviewState({ pullRequest: context.pullRequest, status: "failed" })), currentHead: context.headSha, initialFullStatus: "failed",
       updatedAt: new Date().toISOString(),
     });
   }

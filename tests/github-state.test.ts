@@ -248,3 +248,13 @@ describe("GitHub-owned state and telemetry", () => {
   });
 
 });
+
+test("legacy Check migration survives persisted state and later head transitions", async () => {
+  const { beginCurrentHeadReview } = await import("../src/github/review-progress");
+  const legacy = pendingReviewState({ pullRequest: 43, status: "running" });
+  expect(decodeReviewState(encodeReviewState(legacy))?.legacyChecksMigrated).toBeUndefined();
+  const migrated = { ...legacy, legacyChecksMigrated: true };
+  const restored = decodeReviewState(encodeReviewState(migrated));
+  expect(restored?.legacyChecksMigrated).toBeTrue();
+  expect(beginCurrentHeadReview(restored!, "new-head").legacyChecksMigrated).toBeTrue();
+});
