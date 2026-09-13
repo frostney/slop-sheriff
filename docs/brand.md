@@ -54,6 +54,21 @@ patterns. These standards also apply to Slop Sheriff's own comments.
 
 ## Imagery
 
+Finding comments use a 64×64 reaction portrait beside the severity and
+introduction. Blocking uses the [alarmed robot](assets/slop-sheriff-alarmed-v1.png),
+Important the [skeptical robot](assets/slop-sheriff-concerned-v1.png), Improvement
+the [inspired robot](assets/slop-sheriff-idea-v1.png), and Nitpick the
+[cheeky robot](assets/slop-sheriff-nitpick-v1.png). Both personality-off settings
+remove these portraits. The GitHub account avatar stays the same; the reaction
+is an image inside the comment body.
+
+The four reusable 256×256 PNG exports were generated from the existing icon.
+Reviews select a fixed image URL from severity, without image-generation calls,
+new model output fields or changes to finding identity. The shared formatter
+uses the same artwork on the landing page. GitHub comments reference the public
+`slop-sheriff.dev/assets/` URLs, so deploy the assets before publishing comments
+from this version. Embedded image bytes never enter the comment text.
+
 - [Brand illustration](assets/slop-sheriff-brand.png): the main wordmark and
   robot sheriff in a desert scene.
 - [App avatar](assets/slop-sheriff-avatar.png): the same robot's face, hat, star

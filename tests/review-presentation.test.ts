@@ -8,6 +8,7 @@ import {
 } from "../src/github/review-presentation";
 import { reviewCommentLocation } from "../src/github/publication";
 import type { ReviewFinding, ReviewReport } from "../src/review/findings";
+import { findingReactions, siteOrigin } from "../src/branding";
 
 function finding(
   severity: ReviewFinding["severity"] = "IMPORTANT",
@@ -58,6 +59,25 @@ function report(findings: readonly ReviewFinding[]): ReviewReport {
 }
 
 describe("native GitHub review presentation", () => {
+  test("uses matching reusable reactions in both renderers and omits them with personality off", () => {
+    const urls = new Set<string>();
+    for (const severity of Object.keys(findingReactions) as ReviewFinding["severity"][]) {
+      const input = finding(severity);
+      const { filename, alt } = findingReactions[severity];
+      const body = findingBody(input);
+      const html = findingBodyHtml(input);
+      expect(body).toContain(`src="${siteOrigin}/assets/${filename}"`);
+      expect(html).toContain(`src="/assets/${filename}"`);
+      for (const output of [body, html]) {
+        expect(output).toContain(`width="64" height="64" align="right" alt="${alt}"`);
+        expect(output).not.toContain("base64,");
+      }
+      urls.add(filename);
+      expect(findingBody(input, "line", false)).not.toContain("<img");
+      expect(findingBodyHtml(input, "line", false)).not.toContain("<img");
+    }
+    expect(urls.size).toBe(4);
+  });
   test("uses semantic finding identity instead of the run-local CR number", () => {
     const first = findingBody(finding());
     const renumbered = findingBody({
