@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { SandboxSession } from "eve/sandbox";
 import definition from "../agent/sandbox";
 import { acquisitionNetworkPolicy, transferSandboxFile, withAcquisitionSandbox } from "../src/review/sandbox-acquisition";
-import { acquireEnvironment, acquisitionDeclarationPath, acquisitionRustChannel, dependencyAcquisitionCommand, projectAcquisitionManifest } from "../src/review/environment-acquisition";
+import { acquireEnvironment, acquisitionDeclarationPath, acquisitionRustChannel, dependencyAcquisitionCommand, dependencyMaterializationCommand, validateModernYarnAcquisition, projectAcquisitionManifest } from "../src/review/environment-acquisition";
 import { reviewNetworkPolicy } from "../src/github/review-workspace";
 
 test("executable package configuration is not materialized in the acquisition VM", () => {
@@ -20,7 +20,7 @@ test("executable package configuration is not materialized in the acquisition VM
     expect(dependencyAcquisitionCommand(command)).toContain("--ignore-scripts");
   }
   expect(dependencyAcquisitionCommand("pnpm install --frozen-lockfile")).toContain("--ignore-pnpmfile");
-  for (const command of ["uv sync --frozen", "gradle dependencies", "mvn dependency:go-offline", "swift package resolve", "lwpt install --frozen", "composer install", "yarn install --immutable"]) {
+  for (const command of ["uv sync --frozen", "gradle dependencies", "mvn dependency:go-offline", "swift package resolve", "lwpt install --frozen", "composer install"]) {
     expect(() => dependencyAcquisitionCommand(command)).toThrow("offline acquisition adapter");
   }
 });
@@ -104,4 +104,15 @@ test("native file transfer uses bounded uploads while retaining every archive by
     expect(uploads).toEqual([8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024 + 3]);
     expect(Buffer.compare(await readFile(join(root, "review-environment.tar.gz")), Buffer.from(content))).toBe(0);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("modern Yarn acquires registry/workspace archives without scripts and materializes using its native offline setting", () => {
+  expect(dependencyAcquisitionCommand("yarn install --immutable")).toContain("YARN_ENABLE_SCRIPTS=false");
+  expect(dependencyMaterializationCommand("yarn install --immutable")).toContain("YARN_ENABLE_NETWORK=false");
+  expect(dependencyMaterializationCommand("yarn install --immutable")).not.toContain("--offline");
+  expect(() => validateModernYarnAcquisition('"pkg@npm:1.0.0":\n  resolution: "pkg@npm:1.0.0"\n"app@workspace:.":\n  resolution: "app@workspace:."')).not.toThrow();
+  for (const resolution of ["pkg@git+https://example.com/pkg.git", "pkg@exec:./build.js", "pkg@patch:pkg@npm:1.0.0#./evil.patch"]) {
+    expect(() => validateModernYarnAcquisition(JSON.stringify({ pkg: { resolution } }))).toThrow("isolated archive adapter");
+  }
 });

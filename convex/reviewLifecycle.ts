@@ -114,6 +114,16 @@ export const stage = internalMutation({ args: { attemptId: v.string(), publicati
   const row = await current(ctx, args.attemptId); if (!row) return false;
   // A late failure callback cannot replace a validated report awaiting delivery.
   if (row.publicationKind === "report") return true;
+  if (row.publication && row.publication !== args.publication) {
+    // Storage deletion and pointer replacement share the mutation transaction.
+    // Legacy inline publications do not own a storage object.
+    let previous: unknown;
+    try { previous = JSON.parse(row.publication); } catch { previous = null; }
+    if (typeof previous === "object" && previous !== null && "storageId" in previous && typeof previous.storageId === "string") {
+      const storageId = ctx.db.system.normalizeId("_storage", previous.storageId);
+      if (storageId) await ctx.storage.delete(storageId);
+    }
+  }
   await ctx.db.patch(row._id, { status: "publishing", publication: args.publication, publicationKind: args.kind, ...(args.interruption ? { interruption: args.interruption } : {}), nextAttemptAt: Date.now(), leaseUntil: 0 }); return true;
 } });
 export const claimPublications = internalMutation({ args: {}, returns: v.array(job), handler: async (ctx) => {

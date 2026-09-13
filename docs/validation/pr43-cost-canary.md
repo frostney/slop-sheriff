@@ -40,3 +40,38 @@ Before another paid canary, run the complete offline gate and recorded PR 61
 transition replay, deploy the repaired runtime, and verify the current key and
 team credit separately. A later dashboard balance cannot establish what the
 provider observed when the failed requests were admitted.
+
+## Second attempt and retained repairs
+
+The repaired runtime automatically admitted head `98c4114` at 17:02:13 UTC,
+without another manual full command. Attempt
+`4d282fc1-c4f8-4b22-a085-42d5c27932ec` reached the existing $150 key allowance.
+It ended at 17:23:08 UTC with all Checks terminal and the existing main comment
+marked incomplete. Four lanes completed; claim/specification, deduplication and
+test-against-spec did not. Successful compilation is not a completed review.
+
+The ledger retained 193 call observations and independently reconciled a known
+$28.4272528 subtotal in both SDK and Gateway records. Seven rejected requests
+still lack billing quantities. A superseded recovery attempt between the two
+full attempts reconciled $0.1032942. Together with the first full attempt, the
+known subtotal for this resumed session is $49.0926084, not a complete review
+price or a proven saving. Model input includes repeated context and cache reads.
+
+Deduplication generated an unterminated, schema-forbidden property in a `bash`
+tool call, then repeated whitespace inside that string. The retained stream grew
+to 209,221 characters. Cooperative cancellation was acknowledged but did not
+settle the stream; retiring the exact child allowed the root to reach terminal
+failure. The offline guard rejects the exact recorded stream at character 101,
+using the actual tool schema rather than a length or time ceiling. SDK mock tests
+verify upstream cancellation, no tool execution, and retained generation identity.
+
+Fatal session errors also skipped turn-level sandbox cleanup. The repaired
+session callback stops the root VM with a durable receipt, so later callbacks
+do not reopen it. Both observed abandoned review VMs were stopped explicitly.
+Repeated failure-publication blobs are reclaimed atomically with pointer changes.
+
+Retained findings drove a separate 3,040-byte landing icon, modern Yarn CLI/cache
+support, an incomplete-lockfile triage regression, and concise documentation
+corrections. Real Yarn 4.18.0 acquisition and offline materialization passed with
+the project hook disabled during acquisition, executed offline, and lock unchanged.
+No completed full-plus-delta quality or total-cost comparison is available yet.

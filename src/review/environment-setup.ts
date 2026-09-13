@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SandboxSession } from "eve/sandbox";
 import { lockedDependencyDeclarations, acquireLockedEcosystemDependencies, materializeLockedEcosystemDependencies } from "./locked-dependency-acquisition";
-import { acquireEnvironment, dependencyAcquisitionCommand, projectAcquisitionManifest, acquisitionDeclarationPath, acquisitionRustChannel } from "./environment-acquisition";
+import { acquireEnvironment, dependencyAcquisitionCommand, dependencyMaterializationCommand, validateModernYarnAcquisition, projectAcquisitionManifest, acquisitionDeclarationPath, acquisitionRustChannel } from "./environment-acquisition";
 import { requireSandboxCommand, type AcquisitionFactory } from "./sandbox-acquisition";
 import { buildAgentBrowserCommand, installAgentBrowser, DEFAULT_AGENT_BROWSER_INSTALL_SPEC } from "@agent-browser/eve/sandbox";
 import { rcompare, satisfies } from "semver";
@@ -187,7 +187,7 @@ export function planReviewEnvironment(files: ReadonlyMap<string, string>, paths:
       // Node archive. Only after installation succeeds do we switch PATH links.
       step(`${name}-runtime`, [
         `if ! command -v ${name} >/dev/null || [ \"$(${name} --version)\" != ${quote(pin)} ]; then`,
-        `npm install --global --prefix "$HOME/.local/package-managers/${name}-${pin}" ${quote(`${name}@${pin}`)}`,
+        `npm install --global --prefix "$HOME/.local/package-managers/${name}-${pin}" ${quote(`${name === "yarn" && !pin.startsWith("1.") ? "@yarnpkg/cli-dist" : name}@${pin}`)}`,
         `for tool in ${managerLinks.join(" ")}; do ln -sf "$HOME/.local/package-managers/${name}-${pin}/bin/$tool" "$HOME/.local/bin/$tool"; done`,
         "hash -r",
         "fi",
@@ -375,6 +375,7 @@ export async function prepareReviewEnvironment(sandbox: SetupSandbox, identity: 
     for (const step of plan.steps) {
       if (step.name !== "repository-dependencies") continue;
       const command = dependencyAcquisitionCommand(step.command);
+      if (step.command === "yarn install --immutable") validateModernYarnAcquisition(files.get("yarn.lock")!);
       if (binaryBunLock) await acquisition.writeBinaryFile({ path: "bun.lockb", content: binaryBunLock });
       await acquisition.writeTextFile({ path: "package.json", content: projectAcquisitionManifest(files.get("package.json")!) });
       for (const [path, source] of files) if (path.endsWith("/package.json")) await acquisition.writeTextFile({ path: acquisitionDeclarationPath(path), content: projectAcquisitionManifest(source) });
@@ -415,7 +416,7 @@ export async function prepareReviewEnvironment(sandbox: SetupSandbox, identity: 
       completedSteps.push(step.name);
       continue;
     }
-    const result = await sandbox.run({ command: `set -eu\nexport PATH=\"$HOME/.local/bin:$PATH\"\ncd /workspace\n${step.name === "repository-dependencies" ? `${step.command} --offline` : step.name === "browser-runtime" ? "node_modules/.bin/playwright install chromium" : step.command}` });
+    const result = await sandbox.run({ command: `set -eu\nexport PATH=\"$HOME/.local/bin:$PATH\"\ncd /workspace\n${step.name === "repository-dependencies" ? dependencyMaterializationCommand(step.command) : step.name === "browser-runtime" ? "node_modules/.bin/playwright install chromium" : step.command}` });
     if (result.exitCode !== 0) throw new Error(`Review environment setup failed at ${step.name} (exit ${result.exitCode}): ${String(result.stderr || result.stdout).slice(-2000)}`);
     completedSteps.push(step.name);
   }

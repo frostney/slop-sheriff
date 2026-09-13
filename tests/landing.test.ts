@@ -106,6 +106,7 @@ describe("public landing routes", () => {
     for (const [filename, contentType] of [
       ["slop-sheriff-hero.webp", "image/webp"],
       ["slop-sheriff-icon.png", "image/png"],
+      ["slop-sheriff-web-icon.webp", "image/webp"],
       ["slop-sheriff-social.jpg", "image/jpeg"],
       ...Object.values(findingReactions).map(({ filename }) => [filename, "image/png"] as const),
     ] as const) {

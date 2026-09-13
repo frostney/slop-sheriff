@@ -1,7 +1,7 @@
 import { retireLegacyReviewChecks } from "../../src/lifecycle/legacy-checks";
 import { lifecycleJobSchema } from "../../src/lifecycle/contracts";
 import { reconcileNativeWorker } from "../../src/lifecycle/native-worker";
-import { recoverInterruptedReview } from "../lib/recover-interrupted-review";
+import { recoverInterruptedReview, requestInterruptedReviewRecovery } from "../lib/recover-interrupted-review";
 import { classifyReviewInterruption } from "../../src/lifecycle/prerequisites";
 import { cancelDurableReview, reconcileDurableReview } from "../lib/reconcile-review-worker";
 import { activateReview, finishReview, inspectReview, lifecycleConfigured, lifecycleRequest } from "../../src/lifecycle/client";
@@ -711,7 +711,7 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
         await lifecycleRequest("stop", { attemptId: owner.attemptId });
         await ctx.thread.post("The current review attempt is stopped. Its native workers and exact attempt Checks are being retired.");
       } else if (owner.status === "interrupted") {
-        const recovered = await recoverInterruptedReview(owner);
+        const recovered = await requestInterruptedReviewRecovery(owner.attemptId, control === "key-budget-repaired");
         await ctx.thread.post(recovered ? "Verified prerequisites and saved evidence allow this review to resume through the repository queue." : "The review remains interrupted while its prerequisites or verified recovery evidence are unavailable. No model work was restarted.");
       } else {
         if (owner.sessionId && owner.status === "running") await reconcileNativeWorker(owner.sessionId);
@@ -859,7 +859,7 @@ export default {
       const attemptId = request.headers.get("x-review-attempt");
       const operation = request.headers.get("x-review-operation");
       const job = attemptId ? await inspectReview(attemptId, (operation === "cancel" || operation === "recover")) : null;
-      if (job && operation === "recover") return Response.json({ recovered: await recoverInterruptedReview(job, context) });
+      if (job && operation === "recover") return Response.json({ recovered: await recoverInterruptedReview(job, context, request.headers.get("x-review-key-budget-repaired") === "true") });
       if (job && operation === "cancel") { await cancelDurableReview(job, context); return Response.json({ cancelled: true }); }
       if (job && operation === "reconcile") { await reconcileDurableReview(job, context); return Response.json({ reconciled: true }); }
       if (!job || !await verifiedLifecycleReplay(request, await request.clone().text())) return new Response("stale dispatch", { status: 409 });

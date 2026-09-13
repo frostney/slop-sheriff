@@ -2,6 +2,7 @@ import { GatewayError, GatewayAuthenticationError, GatewayResponseError } from "
 import type { Telemetry } from "ai";
 import { z } from "zod";
 import type { CostObservation, CostScope } from "./cost-ledger";
+import { toolInputStreamValidator } from "../models/tool-input-stream";
 
 export interface CostExecutionScope extends CostScope {
   sessionId: string; turnId: string; stepIndex: number; phase: string;
@@ -42,7 +43,7 @@ export function createCostTelemetry(input: {
 }): Telemetry {
   const calls = new Map<string, { observation: CostObservation; retries: number }>();
   return {
-    async executeLanguageModelCall({ callId, execute, modelId, functionId }) {
+    async executeLanguageModelCall({ callId, execute, modelId, functionId, tools }) {
       const scope = input.scope();
       if (!scope) return execute();
       const retries = (calls.get(callId)?.retries ?? -1) + 1;
@@ -67,12 +68,14 @@ export function createCostTelemetry(input: {
         const result = await execute();
         if (typeof result === "object" && result !== null && "stream" in result && result.stream instanceof ReadableStream) {
           const reader = result.stream.getReader();
+          const validateToolInput = toolInputStreamValidator(tools);
           const stream = new ReadableStream<unknown>({
             async pull(controller) {
               try {
                 const chunk = await reader.read();
                 if (chunk.done) { controller.close(); return; }
                 await update(providerObservation(calls.get(callId)?.observation ?? observation, chunk.value));
+                validateToolInput(chunk.value);
                 controller.enqueue(chunk.value);
               } catch (error) {
                 try {

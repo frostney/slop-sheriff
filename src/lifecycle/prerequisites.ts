@@ -25,8 +25,10 @@ export async function probeReviewPrerequisite(interruption: ReviewInterruption, 
   readonly gateway?: Pick<ReturnType<typeof createGateway>, "getCredits" | "getAvailableModels">;
   readonly currentDeployment?: string;
   readonly currentCredentialFingerprint?: string;
+  /** Explicit operator confirmation after a key-specific allowance/reset check. */
+  readonly keyBudgetRepairConfirmed?: boolean;
 } = {}): Promise<{ ready: boolean; reason: string }> {
-  if (interruption.kind === "key-budget" && interruption.credentialFingerprint === (input.currentCredentialFingerprint ?? credentialFingerprint())) return { ready: false, reason: "api-key-budget-needs-verified-key-specific-repair" };
+  if (interruption.kind === "key-budget" && !input.keyBudgetRepairConfirmed && interruption.credentialFingerprint === (input.currentCredentialFingerprint ?? credentialFingerprint())) return { ready: false, reason: "api-key-budget-needs-verified-key-specific-repair" };
   if ((interruption.kind === "configuration" || interruption.kind === "deterministic") && interruption.deployment === (input.currentDeployment ?? deploymentFingerprint())) return { ready: false, reason: "deployment-repair-not-observed" };
   const gateway = input.gateway ?? createGateway({ fetch: Object.assign((url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) }), { preconnect: fetch.preconnect }) });
   try {

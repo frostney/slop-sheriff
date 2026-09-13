@@ -11,6 +11,7 @@ function imageAsset(type: string, base64: string) {
 // A fixed allowlist serves compiled bytes without exposing repository files.
 const assets = new Map([
   ["/assets/slop-sheriff-hero.webp", imageAsset("image/webp", bundledAssets["slop-sheriff-hero.webp"])],
+  ["/assets/slop-sheriff-web-icon.webp", imageAsset("image/webp", bundledAssets["slop-sheriff-web-icon.webp"])],
   ["/assets/slop-sheriff-icon.png", imageAsset("image/png", bundledAssets["slop-sheriff-icon.png"])],
   ["/assets/slop-sheriff-social.jpg", imageAsset("image/jpeg", bundledAssets["slop-sheriff-social.jpg"])],
   ...Object.values(findingReactions).map(({ filename }) => [

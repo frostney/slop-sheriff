@@ -239,3 +239,10 @@ describe("review environment setup", () => {
     } finally { await rm(root, { recursive: true, force: true }); await rm(acquisitionRoot, { recursive: true, force: true }); }
   });
 });
+
+
+test("modern Yarn pins the official CLI distribution instead of the classic yarn package", () => {
+  const plan = planReviewEnvironment(new Map([["package.json", JSON.stringify({ packageManager: "yarn@4.18.0" })], ["yarn.lock", "fixture"]]), ["package.json", "yarn.lock"]);
+  expect(plan.steps.find(step => step.name === "yarn-runtime")?.command).toContain("@yarnpkg/cli-dist@4.18.0");
+  expect(plan.steps.find(step => step.name === "repository-dependencies")?.command).toBe("yarn install --immutable");
+});

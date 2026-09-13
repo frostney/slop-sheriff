@@ -20,7 +20,7 @@ export function landingPage(indexable: boolean, sourceRevision?: string): string
 <meta name="description" content="${description}">
 <meta name="robots" content="${indexable ? "index, follow" : "noindex, nofollow"}">
 <link rel="canonical" href="${siteOrigin}/">
-<link rel="icon" type="image/png" href="/assets/slop-sheriff-icon.png">
+<link rel="icon" type="image/webp" href="/assets/slop-sheriff-web-icon.webp">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Slop Sheriff">
 <meta property="og:title" content="Slop Sheriff | A new code reviewer in town">
@@ -47,7 +47,7 @@ export function landingPage(indexable: boolean, sourceRevision?: string): string
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="masthead wrap">
-<a class="brand" href="/" aria-label="Slop Sheriff home"><img src="/assets/slop-sheriff-icon.png" width="44" height="44" alt="">Slop Sheriff</a>
+<a class="brand" href="/" aria-label="Slop Sheriff home"><img src="/assets/slop-sheriff-web-icon.webp" width="44" height="44" alt="">Slop Sheriff</a>
 <nav class="nav" aria-label="Main navigation"><a class="desktop-link" href="#review">The review</a><a href="#install">Self-host</a><a href="${repositoryUrl}">GitHub ↗</a></nav>
 </header>
 <main id="main">
@@ -65,7 +65,7 @@ export function landingPage(indexable: boolean, sourceRevision?: string): string
 </section>
 <section class="section wrap" id="review" aria-labelledby="review-title">
 <div class="review-layout"><div class="review-copy"><p class="eyebrow">02 / Show your work, partner</p><h2 id="review-title">A real catch.<br>A short comment.</h2><p>From our own <a href="${exampleFindingSource}">PR #42</a>, condensed into today’s comment format. The alias indexing issue was subsequently fixed.</p><p>A short explanation, visible Impact and Risk, and expandable evidence. Choose theatrical, understated, or plain technical language.</p></div>
-<article class="review" aria-label="Historical review finding from pull request 42"><header class="review-head"><img src="/assets/slop-sheriff-icon.png" alt="" width="38" height="38" loading="lazy"><div><strong>Slop Sheriff <span class="bot-badge">bot</span></strong><small><a href="${exampleFindingSource}">PR #42 · View original comment</a></small></div></header><div class="review-file"><code>src/landing/routes.ts</code> · original line 31</div><div class="review-body">${findingBodyHtml(exampleFinding)}</div></article>
+<article class="review" aria-label="Historical review finding from pull request 42"><header class="review-head"><img src="/assets/slop-sheriff-web-icon.webp" alt="" width="38" height="38" loading="lazy"><div><strong>Slop Sheriff <span class="bot-badge">bot</span></strong><small><a href="${exampleFindingSource}">PR #42 · View original comment</a></small></div></header><div class="review-file"><code>src/landing/routes.ts</code> · original line 31</div><div class="review-body">${findingBodyHtml(exampleFinding)}</div></article>
 </div>
 </section>
 <section class="install" id="install" aria-labelledby="install-title"><div class="wrap">

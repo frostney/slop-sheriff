@@ -4,6 +4,34 @@ import { ContextContainer, contextStorage, serializeContext, deserializeContext 
 import usageCapture from "./fixtures/pr65-telemetry-usage.json";
 import telemetry from "../agent/hooks/telemetry";
 
+test("terminal session failure stops the root VM even when no turn failure event arrives", async () => {
+  let stops = 0;
+  for (const kind of ["github", "subagent"]) {
+    const ctx = {
+      channel: { kind }, session: { id: `fatal-${kind}`, ...(kind === "subagent" ? { parent: {} } : {}), auth: { current: null } },
+      getSandbox: async () => ({ stop: async () => { stops += 1; } }),
+    } as unknown as HookContext;
+    const event = { type: "session.failed", meta: { id: `fatal-${kind}`, at: "2026-09-13T17:02:00Z" }, data: {
+        sessionId: ctx.session.id, code: "FatalError",
+        message: 'Step "step//eve@0.52.5//turnStep" failed after 3 retries: Review attempt has been superseded or is no longer admitted',
+    } } as HookEvent<"session.failed">;
+    const first = new ContextContainer();
+    await contextStorage.run(first, async () => {
+      await telemetry.events?.["session.failed"]?.(event, ctx);
+    });
+    const restored = await deserializeContext(serializeContext(first));
+    await contextStorage.run(restored, async () => {
+      await telemetry.events?.["session.failed"]?.(event, ctx);
+      if (kind === "github") {
+        expect(stops).toBe(1);
+        await telemetry.events?.["turn.started"]?.({ type: "turn.started", meta: { id: "new-turn" }, data: { turnId: "turn_1", sequence: 1 } } as HookEvent<"turn.started">, ctx);
+        await telemetry.events?.["session.failed"]?.(event, ctx);
+      }
+    });
+  }
+  expect(stops).toBe(2);
+});
+
 test("flushes cancelled-turn usage once and stops only the root sandbox", async () => {
   const logged: Record<string, unknown>[] = [];
   const logging = spyOn(console, "info").mockImplementation((value) => { logged.push(JSON.parse(String(value))); });
@@ -33,7 +61,7 @@ test("flushes cancelled-turn usage once and stops only the root sandbox", async 
     expect(budgets).toHaveLength(2);
     expect(budgets.map(({ inputTokens, outputTokens }) => ({ inputTokens, outputTokens })))
       .toEqual([{ inputTokens: 120, outputTokens: 8 }, { inputTokens: 120, outputTokens: 8 }]);
-    expect(stops).toBe(2);
+    expect(stops).toBe(1);
   } finally { logging.mockRestore(); }
 });
 

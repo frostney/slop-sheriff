@@ -1,5 +1,6 @@
 import type { SandboxSession } from "eve/sandbox";
 import { z } from "zod";
+import { parse as parseYaml } from "yaml";
 import { withAcquisitionSandbox, requireSandboxCommand, transferSandboxFile, type AcquisitionFactory } from "./sandbox-acquisition";
 
 // Record system packages before trusted installers run, then export only files
@@ -84,8 +85,31 @@ export function dependencyAcquisitionCommand(command: string): string {
   if (/^bun install --frozen-lockfile$/.test(command)) return `${command} --ignore-scripts`;
   if (/^npm ci --no-audit --no-fund$/.test(command)) return `${command} --ignore-scripts`;
   if (/^pnpm install --frozen-lockfile$/.test(command)) return `${command} --ignore-scripts --ignore-pnpmfile`;
-  // Yarn modern lockfiles may request executable plugins; do not evaluate them
-  // during acquisition. Yarn 1 has a complete script-disable installation path.
   if (command === "yarn install --frozen-lockfile") return `${command} --ignore-scripts`;
+  if (command === "yarn install --immutable") return `${modernYarnCacheEnvironment} YARN_ENABLE_SCRIPTS=false ${command}`;
   throw new Error("This dependency resolver requires an offline acquisition adapter; repository code cannot run in the download sandbox");
+}
+
+const modernYarnCacheEnvironment = 'YARN_ENABLE_GLOBAL_CACHE=true YARN_GLOBAL_FOLDER="$HOME/.cache/slop-sheriff/yarn"';
+
+export function dependencyMaterializationCommand(command: string): string {
+  // Modern Yarn has no --offline flag. Its native network setting keeps the
+  // original project's linker and hooks while consuming the exported cache.
+  return command === "yarn install --immutable"
+    ? `${modernYarnCacheEnvironment} YARN_ENABLE_NETWORK=false ${command}`
+    : `${command} --offline`;
+}
+
+export function validateModernYarnAcquisition(lockfile: string): void {
+  const lock = z.record(z.string(), z.unknown()).parse(parseYaml(lockfile));
+  for (const [key, value] of Object.entries(lock)) {
+    if (key === "__metadata") continue;
+    const { resolution } = z.object({ resolution: z.string() }).parse(value);
+    // Git and external patch/plugin resolvers can execute packing code. Admit
+    // registry archives and projected workspaces only; never run those resolvers
+    // with network access. Project .yarnrc.yml and plugins are never transferred.
+    if (!/^(?:@[^/\s]+\/)?[^@/\s]+@(?:npm|workspace):[^\r\n]+$/.test(resolution)) {
+      throw new Error("Modern Yarn acquisition requires npm or workspace resolutions; executable resolver needs an isolated archive adapter");
+    }
+  }
 }
