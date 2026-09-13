@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
 import { findingBodyHtml } from "../src/github/review-presentation";
+import { findingReactions } from "../src/branding";
 import { exampleFinding, exampleFindingSource } from "../src/landing/example-finding";
 import { landingPage } from "../src/landing/page";
 import { landingPaths, landingResponse } from "../src/landing/routes";
@@ -106,6 +107,7 @@ describe("public landing routes", () => {
       ["slop-sheriff-hero.webp", "image/webp"],
       ["slop-sheriff-icon.png", "image/png"],
       ["slop-sheriff-social.jpg", "image/jpeg"],
+      ...Object.values(findingReactions).map(({ filename }) => [filename, "image/png"] as const),
     ] as const) {
       const source = await readFile(new URL(`../docs/assets/${filename}`, import.meta.url));
       const response = landingResponse(request(`/assets/${filename}`), "production");

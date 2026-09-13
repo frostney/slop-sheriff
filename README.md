@@ -119,7 +119,11 @@ Choose `voice: theatrical` (C, default), `voice: understated` (B), or
 severity, or the recommendation. Each finding has a 25 to 45 word introduction,
 expandable evidence, applicable principle and fix direction, then visible Impact
 (at most 300 characters) and one-sentence Risk. The whole comment stays within
-200 words. See the [voice and visual guide](docs/brand.md).
+200 words. With personality enabled, a compact robot portrait reacts to the
+finding: alarmed for Blocking, skeptical for Important, inspired for Improvement,
+and a cheeky wink for Nitpick. Both `voice: off` and `personality: false` hide it.
+These are reusable images, with no image-generation calls during reviews.
+See the [voice and visual guide](docs/brand.md).
 The [validation record](docs/validation/slop-sheriff.md) includes comment
 previews, policy measurements and the remaining real-model comparison work.
 

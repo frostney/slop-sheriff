@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import bundledAssets from "./assets.json";
 import { landingPage, siteOrigin } from "./page";
+import { findingReactions } from "../branding";
 
 function imageAsset(type: string, base64: string) {
   const bytes = Buffer.from(base64, "base64");
@@ -12,6 +13,9 @@ const assets = new Map([
   ["/assets/slop-sheriff-hero.webp", imageAsset("image/webp", bundledAssets["slop-sheriff-hero.webp"])],
   ["/assets/slop-sheriff-icon.png", imageAsset("image/png", bundledAssets["slop-sheriff-icon.png"])],
   ["/assets/slop-sheriff-social.jpg", imageAsset("image/jpeg", bundledAssets["slop-sheriff-social.jpg"])],
+  ...Object.values(findingReactions).map(({ filename }) => [
+    `/assets/${filename}`, imageAsset("image/png", bundledAssets[filename]),
+  ] as const),
 ]);
 
 export const landingPaths = ["/", "/robots.txt", "/sitemap.xml", ...assets.keys()];

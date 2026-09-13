@@ -1,7 +1,8 @@
 import { findingBodyHtml } from "../github/review-presentation";
 import { exampleFinding, exampleFindingSource } from "./example-finding";
+import { siteOrigin } from "../branding";
 
-export const siteOrigin = "https://slop-sheriff.dev";
+export { siteOrigin } from "../branding";
 export const repositoryUrl = "https://github.com/frostney/slop-sheriff";
 
 const description = "Meet Slop Sheriff, a cowboy GitHub code reviewer. Focused review lanes, concise findings, and evidence you can inspect. Deploy it on your own infrastructure.";

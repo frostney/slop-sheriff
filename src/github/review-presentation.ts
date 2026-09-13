@@ -1,4 +1,5 @@
 import { findingIsOutstanding, type ReviewFinding, type ReviewReport } from "../review/findings";
+import { findingReactionHtml } from "../branding";
 import type { ReviewConfig, ReviewProfile } from "../config/review-config";
 import { findingIdentity } from "../review/finding-identity";
 import {
@@ -149,6 +150,7 @@ export function findingBody(
     presentation.marker,
     `### ${presentation.severity} ${renderSafeRichText(presentation.title)}`,
     "",
+    ...(personality ? [findingReactionHtml(finding.severity, true), ""] : []),
     `**${presentation.label}**`,
     ...(presentation.location ? ["", `Reported location: \`${finding.location.path}\`, line ${finding.location.line}`] : []),
     "",
@@ -177,6 +179,7 @@ export function findingBodyHtml(
   const presentation = inlineFindingPresentation(finding, placement, personality);
   return [
     `<h3>${presentation.severity} ${richTextHtml(presentation.title)}</h3>`,
+    ...(personality ? [findingReactionHtml(finding.severity, false)] : []),
     `<p><strong>${escapeHtml(presentation.label)}</strong></p>`,
     ...(presentation.location ? [`<p>${escapeHtml(presentation.location)}</p>`] : []),
     ...(presentation.introduction ? [`<p>${escapeHtml(presentation.introduction)}</p>`] : []),
