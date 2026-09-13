@@ -169,6 +169,12 @@ test("required source evidence cannot disappear during canonical assembly", asyn
   expect(retained.probes[0]?.result).toContain("Proposed: Head documentation now claims exit 0");
   const assembled = assembleCanonicalReviewReport({ draft: retained, generatedAt: "2026-09-12T00:00:00.000Z", priorReport: null, state: beginReportAssembly({ executionRevision: "review-report-v2", repositoryId: "R_fixture", pullRequest: 1, ...identity, planKind: "full", baselineHead: null, reviewPaths: ["src/cli.ts"], activeAxes: ["claim-and-specification"], selectedFindingIds: [] }) });
   expect(assembled.report?.findings[0]).toMatchObject({ severity: "IMPORTANT", category: "CLAIM", requirementIds: [sourceId] });
+  const priorFinding = assembled.report!.findings[0]!;
+  const presentationDraft = { ...draft, freshFindings: [] };
+  expect(retainSpecialistEvidence(presentationDraft, [report], [priorFinding]).freshFindings).toEqual([]);
+  expect(() => retainSpecialistEvidence(presentationDraft, [report], [{ ...priorFinding, status: "fixed" }])).toThrow("material claim finding");
+  expect(() => retainSpecialistEvidence(presentationDraft, [report], [{ ...priorFinding, severity: "IMPROVEMENT" }])).toThrow("material claim finding");
+  expect(() => retainSpecialistEvidence(presentationDraft, [report], [{ ...priorFinding, dismissal: { actor: "maintainer", reason: "Accepted", head: identity.headSha, commentId: "1" } }])).toThrow("material claim finding");
   const schema = await asSchema(reviewLaneCheckpointInputSchema).jsonSchema;
   expect(schema).toHaveProperty("properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.requirementChecks.anyOf.0.items.additionalProperties", false);
   expect(schema).toHaveProperty("properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.requirementChecks.anyOf.0.items.required", expect.arrayContaining(["sourceId", "obligationId", "basis", "establishedRequirement", "proposedChange", "approvalEvidence", "expected", "observed", "action", "environment", "status"]));

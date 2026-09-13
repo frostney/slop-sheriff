@@ -3,8 +3,8 @@ import { modelObservations } from "../lib/model-observations";
 import { recordTurnUsage, summarizeTurnUsage, type TurnUsageState } from "../../src/telemetry/turn-usage";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineHook, type HookContext } from "eve/hooks";
-import { toolResultFrom } from "eve/tools";
-import publishReviewTool from "../tools/publish_review";
+import { reviewToolResult } from "../lib/review-tool-results";
+import { publishReviewOutputSchema } from "../tools/publish_review";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import {
   publishBudgetExhaustedCheck,
@@ -17,7 +17,7 @@ import {
 } from "../../src/github/trusted-context";
 import { memoryPolicyHash } from "../../src/memory/policy";
 import type { ReviewRoute } from "../../src/models/routing";
-import { reviewRouteState } from "../lib/review-route";
+import { reviewRouteState, currentReviewRoute, bindCoordinatorPresentationOnly } from "../lib/review-route";
 import { shadowInputExceedances } from "../../src/telemetry/budget-policy";
 import {
   gatewayTelemetryIdentity,
@@ -102,7 +102,7 @@ async function stopReviewSandbox(ctx: HookContext): Promise<void> {
 
 function executionRoute(channelKind: string | undefined): ReviewRoute {
   if (channelKind !== "subagent") {
-    return { role: "coordinator", attempt: 0 };
+    return currentReviewRoute(channelKind, []);
   }
   return reviewRouteState.get() ?? { role: "coordinator", attempt: 0 };
 }
@@ -116,7 +116,7 @@ function reviewPhase(route: ReviewRoute): string {
   if (route.role === "lane") return "fresh-axes";
   if (route.role === "revalidation") return "revalidation";
   if (route.role === "scout") return "axis-investigation";
-  return "coordination";
+  return route.task === "presentation" ? "presentation" : "coordination";
 }
 
 function logCompletedModel(
@@ -415,6 +415,7 @@ export default defineHook({
   events: {
     "turn.started"(_event, ctx) {
       if (!isLifecycleOwner(ctx)) return;
+      bindCoordinatorPresentationOnly(false);
       sandboxStopped.update(() => false);
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
@@ -434,7 +435,7 @@ export default defineHook({
       );
     },
     "action.result"(event) {
-      if (toolResultFrom(event.data.result, publishReviewTool)) {
+      if (reviewToolResult(event.data.result, "publish_review", publishReviewOutputSchema)) {
         publishedTurnId.update(() => event.data.turnId);
         const recovery = reviewRecoveryState.get();
         if (recovery?.stage === "report-reconciled") {

@@ -142,13 +142,13 @@ describe("bounded impact contract", () => {
       model: mockModel(() => {
         attempts += 1;
         return attempts > 2 ? "accepted" : { toolCalls: [{ name: "assemble_review_report", input: {
-          draft: { ...draft, freshFindings: [{ ...draftFinding, impactSummary: attempts === 1 ? "x".repeat(301) : "A retry duplicates comments." }] },
+          draft: { actionSummary: draft.actionSummary, additionalConcerns: [], freshFindings: [{ ...draftFinding, impactSummary: attempts === 1 ? "x".repeat(301) : "A retry duplicates comments." }] },
         } }] };
       }),
       prompt: "Assemble the reviewed finding.", stopWhen: stepCountIs(3),
       tools: { assemble_review_report: tool({ inputSchema: assembleReviewReportInputSchema, execute({ draft: input }) {
         executions += 1;
-        return assembleCanonicalReviewReport({ state: beginReportAssembly(identity), priorReport: null, generatedAt, draft: input });
+        return assembleCanonicalReviewReport({ state: beginReportAssembly(identity), priorReport: null, generatedAt, draft: { ...draft, ...input } });
       } }) },
     });
     expect(result.steps[0]?.toolCalls[0]).toMatchObject({ invalid: true, error: { name: "AI_InvalidToolInputError" } });

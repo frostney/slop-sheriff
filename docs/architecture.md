@@ -11,7 +11,7 @@ flowchart LR
   GI --> MD["Installation memory deletion"]
   EC --> LC["Deterministic lifecycle and trusted config"]
   LC --> ER["Eve coordinator"]
-  ER --> WF["Workflow axes and scouts"]
+  ER --> WF["Persistent component and requirement work"]
   ER --> VS["Persistent Vercel Sandbox"]
   ER --> AG["Vercel AI Gateway"]
   ER --> CM["Convex RAG memory"]
@@ -37,164 +37,93 @@ operation. It does not register the adapter's webhook route.
 
 ## Admission and dispatch
 
-Before a model can run, the channel fetches current PR metadata, reads config at
-the base SHA, validates its closed schema, lists current PR files, decodes the
-GitHub-owned baseline, computes the effective patch, and chooses exactly one
-lifecycle plan. Invalid config and lost state create a failed Check directly.
-Semantic no-ops reuse the prior v2 artifact directly. Neither path invokes a
-model.
+Verified webhook admission, the fair repository queue, current-head ownership,
+trusted-base configuration and publication fencing remain application-owned.
+Every reviewable update with a baseline takes the incremental path. An unchanged
+effective patch alone cannot authorize republishing: changed supporting base code
+or requirements may invalidate earlier evidence. Missing or corrupted canonical
+state fails visibly. A known interrupted initial review retains its completed work
+and can continue on a new head without a published baseline.
 
-For model-backed paths, the channel writes the trusted base/head/config/plan
-into Eve auth attributes and adds a review envelope to context. Publication
-tools accept no report or target from the model. They load a validated staged
-report whose repository, PR, base, head, patch, and plan match trusted context.
+The current PR manifest supplies complete finding scope. A published baseline
+preserves canonical findings and threads; it no longer determines which technical
+investigations can be reused. Completed component assessments are stored as soon
+as they finish, independently of the root report and GitHub publication.
 
 ## Review execution
 
-Slop Sheriff selects a locally authored role policy for each Eve turn. The
-existing authored workflow maps trusted active axes one-to-one to Eve root
-copies, preserving their shared sandbox, signed checkpoints and bounded scout
-continuations. Content-based triage always retains the broad engineering-quality
-core, including claim alignment and reuse. Specialists activate for concrete
-review needs: changed behavior, public contracts, dependencies/shared abstractions,
-authored prose, tests and consequential risks. Public surfaces retain discoverability.
-Incomplete or unfamiliar patches widen the specialist selection. Decisions and
-reasons are bound to the trusted plan; skipped reasons reach canonical coverage.
-A test-against-spec lane records explicit-requirement behavior through real
-interfaces; a writing lane inspects changed prose, UI strings and comments.
-A conditional test-health lane inspects changed or affected tests as a frozen
-external contract: establish consumer expectations before the implementation,
-then check meaningful public outcomes, failure sensitivity and tolerance of
-behavior-preserving refactors. It never derives expectations from the current
-implementation or changes tests to make observed behavior pass. Engineering
-quality retains its existing test-value coverage; spec testing judges product
-behavior, while test health judges the independence and reliability of tests.
+`buildReviewWorkPlan` assigns one broad technical assessment per affected
+component. Correctness, reuse, dependency value and design duplication share that
+investigation. Independent requirement assessment and real-interface verification
+remain separate from implementation analysis. Writing, test health, discoverability
+and configured project specialists receive their selected surfaces and relevant
+requirements. Every changed file retains core ownership. The final axis report
+records application-selected exclusions without claiming they were probed.
 
-Eve 0.52.5 resolves turn instructions before appending the incoming child
-message. The first child turn therefore receives fixed child authority and
-the exact application-authored task policy in its routed dispatch message.
-Later turns can select the durable bound role. Coordinator procedure never
-enters first-child system context. The deterministic runtime smoke imports the
-production resolver and verifies this lifecycle against the native mock model.
+A work unit has a stable identity, current source/requirement/policy inputs, a
+signed packet, and an immutable completion. Input identity includes component
+membership, exact base/head blobs, relevant configuration and requirements.
+Additional source reads and searches record their dependencies, including negative
+search scope. Shared probe receipts bind the actual command, input files,
+toolchain, environment and output. Missing or changed proof requires fresh work;
+a storage failure is an operational error, not an automatic paid cache miss.
+Unknown historical contracts are retained only as context.
 
-Specialist packets preserve every manifest index and its coverage obligation.
-Spec packets include potential specification patches and implementation
-metadata; omitted patches never establish behavioral success. Writing packets
-omit known binary/lock payloads while retaining explicit classification work.
-Test-health packets include potential test and contract sources, with metadata
-for implementation/dependency entries and an obligation to locate affected
-consumer-facing tests.
-Every completed specialist report classifies all manifest entries with
-passed, failed, unverified or out-of-scope evidence. Failed and unverified
-results remain in canonical probes and limitations through deterministic
-assembly. Core packets still include the complete classified review scope.
-Continuations have no fixed dispatch count. Signed receipts include a digest
-of checkpoint observations and application-recorded packet movement. Revision
-counters and reworded plans or limitations do not count as progress. Repeating the same
-checkpoint work and scout requests, including cycles, stops explicitly while
-retaining the checkpoint. A revision increment alone does not prove progress.
-Child context contains the review identity and kind; unrelated axis decisions
-and prior-finding IDs stay with the coordinator instead of every child.
+A subsequent fix receives the change since the previously assessed head, the
+original claim, and previous observations. If that commit is unavailable, the
+packet explicitly retains the original PR patch. Requirement assessments begin
+with their source clauses and a file index rather than another copy of every
+patch. Scope omission never proves verification. Missing installable tools must
+be repaired and the required checks executed before completion.
 
-After the root revalidates the exact PR
-head, an Eve `action.result` hook performs one application-owned preparation
-phase without putting preparation commands or raw patches in model history.
-Its immutable ledger binds the trusted repository, pull request, base, head,
-patch, plan, and execution revision to component digests for the classified
-patch, capability inventory, exact-head GitHub Checks, workflow artifacts,
-common probes, and typed gaps. The same ledger records stable content-derived
-identities for shared patch preparation, capability discovery, exact-head
-evidence, repository history, repository memory, and probes. Prepared memory
-contains only normalized findings and provenance; prepared history contains
-only revision identities and paths.
+Tracked tools provide exact source reads, shared executable probes, full output
+paging, native public-document fetches and actual image inspection. Their current
+observations are authenticated separately from cross-head reuse eligibility.
+An explicit rerun, a disposable mutation experiment, or a live external observation
+can be valid current evidence even when it is ineligible for later reuse. Shared
+tests record one execution; each independent reviewer still judges the result
+against its own frozen expectations. They may request different scenarios or
+repeated execution to assess sensitivity and flakiness.
 
-The trusted application boundary lists Checks and workflow runs at the exact
-head. It accepts only unexpired artifact archives whose workflow repository,
-head repository, head SHA, run identity, and SHA-256 digest match GitHub
-metadata. Validated archives enter only the credential-free sandbox as
-untrusted data and are never executed. Missing artifacts remain availability
-metadata; local execution can supply the required behavioral evidence. Stale, mismatched, or unavailable
-application-owned evidence fails closed before lanes run.
+The Eve workflow consumes the prepared work plan. Reused completions require no
+child call. Pending units share the worker capacity already reserved by durable
+admission. A useful continuation retains its native child context; a stronger
+model receives saved progress only when unresolved ambiguity or contradictory
+evidence justifies an explicit escalation and the configured model/effort differs.
+There is no model-step, token, duration or spending completion cutoff. Repeated
+work without new evidence fails visibly and preserves its checkpoint.
 
-Every lane receives the same ledger digest with its bounded evidence packet
-instead of probing shared evidence again. Lanes page an integrity-checked
-manifest and bounded patch chunks instead of independently reconstructing the
-diff. Their checkpoints bind the ledger digest, while axis-specific source,
-history, test, and probe investigation remains available. Child routing
-envelopes contain an exact skill axis or the `revalidation` or `scout` role.
-Dynamic model routing maps these roles directly to trusted `agents`
-configuration.
+Eve 0.52.5's workflow helper returns model output without the native agent handle.
+The authenticated application route therefore reads recorded public Session events
+and binds results to the actual root, invocation, child and turn. Dispatch intents
+and child admission fences reject an unexpected fresh child during continuation,
+including the installed helper's missing-agent fallback. Cancellation fences late
+children before their first model call and drains admitted children. This uses
+public Session APIs; authored `subagent.called` hooks do not receive workflow calls
+in this installed version. Native smoke tests exercise this boundary.
 
-AI Gateway receives the first model and its ordered `models` fallback array.
-The Gateway generation lookup records the actual model and provider that
-served the response, including when a fallback succeeded.
+Role-specific native tool resolution removes untracked filesystem and legacy lane
+operations from assigned work children. The static workflow tool remains visible
+because the installed Eve compiler does not support a dynamic workflow definition;
+its executor rejects child invocation. Native tool-result hooks validate runtime
+names and output schemas for dynamically wrapped tools.
 
-Every active axis is a fresh invocation and every attempt-zero axis starts in
-one concurrent fan-out as soon as application-owned preparation completes.
-No axis waits for claim-and-specification or provider cache creation. Eve and
-AI Gateway may still cache stable prefixes automatically, but caching does not
-control scheduling. Every lane packet carries the same stable common-work
-identities and prepared results. Axis-specific investigation and continuation
-checkpoints remain independent. Prepared repository memory is advisory evidence
-that each axis must revalidate against the current pull request.
+Analysis writes plain technical facts. The coordinator receives candidates, failed
+checks and conflicting observations for judgment. Application code combines full
+scope, coverage, probes, churn and verified claims from the signed assessments;
+the model does not transcribe ordinary passing evidence. It assigns justified
+severity and writes the public explanation. Existing introductions can be rewritten
+for the configured voice without changing their evidence, IDs, severity, lifecycle
+or recommendation. The canonical assembly and GitHub staging contracts retain
+prior-finding revalidation and stable threads.
 
-Each lane writes one compact schema-v3 checkpoint before it returns. A complete
-checkpoint owns a strict typed terminal report of its scope, coverage, churn,
-probes, candidates, verified claims, and limitations, and prevents duplicate
-work; the authored `workflow` tool returns only completion receipts. Lane candidates contain
-evidence and remediation facts but no severity, category, status, identifier,
-or verdict. An incomplete checkpoint records reviewed and remaining manifest
-entry indexes, reproduced observations, next steps, and limitations. The same
-authored Eve workflow starts a fresh built-in subagent that reconciles that
-packet with the immutable manifest, without inheriting the prior model history.
-This reuses the checkpoint-and-reconcile semantics of Milestone Rush; it does
-not introduce another workflow runtime or state service.
-
-Application code owns the lane/scout loop through `defineWorkflowTool` and
-`ctx.agent`. Trusted session context fixes axes, identity and plan. The model
-supplies one bounded common claim/context field, treated as a hypothesis below
-that authority. Each lane copies an application-issued checkpoint attestation
-into its strict native task result. The attestation binds the signed checkpoint
-to the root session, native invocation, axis, attempt, revision and review
-identity. Only a fresh write can authorize incomplete continuation. Complete
-checkpoint reads support authorized recovery without repeating investigation.
-
-Attestations establish what the checkpoint tool validated. Recovery reads signed
-artifacts from the authoritative Convex evidence store and verifies identity,
-current runtime policy, manifest coverage, requirements and packet progress.
-Complete lanes receive fresh invocation-bound read receipts and avoid another
-model dispatch. An incomplete lane resumes from verified progress.
-
-The workflow tool cannot access a sandbox in Eve 0.52.5, so it uses the trusted
-evidence reader. Ordinary tools own workspace preparation. A local physical
-receipt and live Git HEAD prove that a restored VM actually contains the review
-checkout; signed durable evidence alone does not prove filesystem readiness.
-
-Productive continuation has no fixed dispatch count. Repeated or cyclic progress
-fails visibly. Native keys stabilize replay within a run, and active native runs
-are requeued under their original identity. Terminal recovery drains descendant
-scheduling before a replacement attempt. Existing HTTP requests may still finish;
-per-call ownership checks prevent obsolete attempts starting further model calls.
-Unresolved in-flight accounting remains visible.
-
-When a lane needs bounded related-source, history, rendered-page, or web
-evidence, the coordinator starts a fresh routed scout and passes its compact
-evidence to the next fresh lane. Selected-finding outcomes are persisted before
-report assembly. After all typed axis reports pass application validation, the
-coordinator filters candidates, reconciles duplicates and conflicts, and
-assigns severity and category through the strict assembly contract. Typed
-application code then coalesces duplicate fresh identities, merges prior and
-fresh findings, sets fresh findings open, derives skipped-axis coverage,
-preserves stable prior IDs, assigns new IDs, injects trusted review identity,
-derives the verdict, validates the v2 report, and stages it beside the
-unchanged baseline. The app then derives exact-copy
-text and code segments deterministically from canonical finding text, location
-paths, and symbols.
-
-Eve compacts a lane at 25 percent of the selected model's context window. The
-percentage adapts to arbitrary Gateway models while leaving enough room for a
-large evidence chunk, related source, and probe output. Compaction and fresh
-checkpoint continuation preserve review depth; neither is a completion gate.
+The workflow cannot access a sandbox directly, so ordinary tools prepare and
+validate the physical workspace. Signed evidence alone never proves that a restored
+VM has the checkout or dependencies. The shared environment preparation, exact-head
+GitHub artifact validation and credential-free repository sandbox remain in place.
+Gateway receives the selected model and its ordered fallback chain. Task-specific
+routing and quality/cost evidence are documented in
+[review quality and lifecycle economics](validation/review-quality.md).
 
 ## Repository memory
 
@@ -288,9 +217,8 @@ baseline, and retries reuse existing parts. Each comment is bounded to 65,000
 bytes, serialized state to 8 MiB, and compressed storage to 64 parts of 60,000
 characters. Invalid or oversized state and inline findings fail before advancing
 the baseline. A completed or failed Eve
-turn that did not publish a validated artifact becomes a failed Check; an
-initial failure marks the baseline lost so a later webhook cannot silently run
-a second full review.
+turn that did not publish a validated artifact becomes a failed Check; a known interrupted initial review preserves its component completions for
+validated recovery. Corrupted canonical state remains fail-closed.
 
 A current-head failure also records a bounded, sanitized envelope beside the
 unchanged successful baseline. It binds the failed stage and completed axes to

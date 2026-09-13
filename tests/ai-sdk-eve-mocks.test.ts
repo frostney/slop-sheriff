@@ -39,13 +39,7 @@ const validFinding = {
 
 const validDraft = {
   actionSummary: "Validated the report publication contract.", additionalConcerns: [],
-  scope: { claim: "Validate the review contract.", dirtyState: "clean" },
-  coverage: { staticOnly: [], unreached: [] },
-  churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] },
-  probes: [],
   freshFindings: [validFinding],
-  verifiedClaims: [],
-  limitations: [],
 };
 
 describe("official AI SDK and Eve mocks", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { currentReviewRoute, requireReviewLane, reviewRouteState } from "../agent/lib/review-route";
+import { readReviewRoute, currentReviewRoute, requireReviewLane, reviewRouteState } from "../agent/lib/review-route";
 import type { ReviewRoute } from "../src/models/routing";
 import type { ModelMessage } from "ai";
 import type { InstrumentationStepStartedEventInput } from "eve/instrumentation";
@@ -142,7 +142,7 @@ describe("dynamic Eve model routing", () => {
     })).toThrow("missing its routing envelope");
   });
 
-  test("routes scout copies to Luna with xhigh OpenAI reasoning", () => {
+  test("routes scout copies to Luna without a hardcoded provider override", () => {
     expect(
       selectRoutedModel({
         attributes: { [routingAttribute]: config },
@@ -156,7 +156,6 @@ describe("dynamic Eve model routing", () => {
       modelOptions: {
         providerOptions: {
           gateway: { caching: "auto" },
-          openai: { reasoningEffort: "xhigh" },
         },
       },
     });
@@ -180,4 +179,21 @@ describe("dynamic Eve model routing", () => {
       }),
     ).toThrow("Unknown review axis");
   });
+});
+
+
+test("instrumentation observes installed Eve inputs without an authored context or state mocks", () => {
+  const event = {
+    session: { auth: { current: { attributes: { [routingAttribute]: config } } } },
+    channel: { kind: "subagent" },
+    modelInput: { messages: childMessage(routingEnvelope({ role: "lane", axis: "deduplication", attempt: 0 })) },
+  } as unknown as InstrumentationStepStartedEventInput;
+  expect(() => reviewRouteState.get()).toThrow("No active eve context.");
+  expect(instrumentation.runtimeContext?.(event)).toMatchObject({
+    "review.task": "analysis", "review.requested_model": "moonshotai/kimi-k3",
+  });
+  expect(() => reviewRouteState.get()).toThrow("No active eve context.");
+  const root = { ...event, channel: { kind: "github" }, modelInput: { messages: [] } } as unknown as InstrumentationStepStartedEventInput;
+  expect(instrumentation.runtimeContext?.(root)).toEqual({ "review.role": "coordinator", "review.task": "unknown" });
+  expect(readReviewRoute("subagent", [])).toBeNull();
 });

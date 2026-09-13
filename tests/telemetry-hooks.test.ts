@@ -143,9 +143,6 @@ test("retains measured zero token and cost quantities in completed-model logging
 
 test("successful publication survives worker turnover and cannot bless a later turn", async () => {
   const publication = await import("../src/github/publication");
-  const { registerDefinitionSource } = await import("../node_modules/eve/dist/src/internal/authored-definition/source-identity.js");
-  const publishTool = (await import("../agent/tools/publish_review")).default;
-  registerDefinitionSource(`tool:${publishTool.description}`, { kind: "tool", name: "publish_review" });
   const failClosed = spyOn(publication, "publishFailClosedCheck").mockResolvedValue("offline-check");
   const errorLogs = spyOn(console, "error").mockImplementation(() => {});
   const network = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => { throw new Error("Unexpected network call"); }, { preconnect() {} }));
@@ -162,7 +159,7 @@ test("successful publication survives worker turnover and cannot bless a later t
     await contextStorage.run(initial, async () => {
       await hook.events?.["action.result"]?.({ type: "action.result", meta: { id: "publication", at: "2026-09-08T00:00:00Z" }, data: {
         turnId: "published-turn", sequence: 1, stepIndex: 1, status: "completed",
-        result: { kind: "tool-result", toolName: "publish_review", callId: "publish-call", output: {} },
+        result: { kind: "tool-result", toolName: "publish_review", callId: "publish-call", output: { checkUrl: "https://github.com/acme/widget/pull/7/checks", findingCount: 0, memory: "unavailable" } },
       } } as HookEvent<"action.result">, ctx);
     });
     let serialized = serializeContext(initial);
@@ -222,6 +219,34 @@ test("retains the bound lane and requested model across step worker turnover", a
     });
     expect(logged.find(record => record.event === "known-good-review.model.completed")).toMatchObject({
       requestedModel: "openai/gpt-5.6-sol", reviewAxis: "engineering-quality", phase: "fresh-axes", attempt: 2,
+    });
+  } finally { logging.mockRestore(); }
+});
+
+
+test("presentation telemetry retains the actual step route while a new root turn resets to adjudication", async () => {
+  const { bindCoordinatorPresentationOnly, currentReviewRoute } = await import("../agent/lib/review-route");
+  const logged: Record<string, unknown>[] = [];
+  const logging = spyOn(console, "info").mockImplementation(value => { logged.push(JSON.parse(String(value))); });
+  const ctx = { channel: { kind: "github" }, session: { id: "presentation-worker", auth: { current: null } } } as unknown as HookContext;
+  try {
+    const initial = new ContextContainer();
+    await contextStorage.run(initial, async () => {
+      bindCoordinatorPresentationOnly(true);
+      await telemetry.events?.["step.started"]?.({ type: "step.started", meta: { id: "presentation-start", at: "2026-09-13T00:00:00Z" }, data: {
+        turnId: "presentation-turn", stepIndex: 0, sequence: 0, modelId: "openai/gpt-5.6-luna",
+      } }, ctx);
+    });
+    const restored = await deserializeContext(serializeContext(initial));
+    await contextStorage.run(restored, async () => {
+      await telemetry.events?.["turn.started"]?.({ type: "turn.started", meta: { id: "new-review-turn" }, data: { turnId: "new-turn", sequence: 1 } } as HookEvent<"turn.started">, ctx);
+      expect(currentReviewRoute("github", []).task).toBeUndefined();
+      await telemetry.events?.["step.completed"]?.({ type: "step.completed", meta: { id: "presentation-end", at: "2026-09-13T00:00:00Z" }, data: {
+        turnId: "presentation-turn", stepIndex: 0, sequence: 0, finishReason: "stop", usage: { inputTokens: 12, outputTokens: 4 },
+      } }, ctx);
+    });
+    expect(logged.find(record => record.event === "known-good-review.model.completed")).toMatchObject({
+      requestedModel: "openai/gpt-5.6-luna", phase: "presentation", attempt: 0,
     });
   } finally { logging.mockRestore(); }
 });

@@ -27,6 +27,8 @@ describe("specialists selected from changed review needs", () => {
       .toEqual(["claim-and-specification", "engineering-quality", "writing-quality"]);
     expect(selected(change("README.md", "Welcome to the project.", "Read the setup guide.")))
       .toEqual(["claim-and-specification", "engineering-quality", "writing-quality"]);
+    expect(selected(change("docs/deployment.md", "Read the setup guide.", "The authentication migration uses the existing rollback procedure.")))
+      .toEqual(["claim-and-specification", "engineering-quality", "writing-quality"]);
   });
   test("tests get independent brittleness review without duplicating implementation verification", () => {
     expect(selected(change("tests/total.test.ts", "expect(total()).toBe(1);", "expect(total()).toBe(2);")))
@@ -44,7 +46,7 @@ describe("specialists selected from changed review needs", () => {
   });
   test("dependency changes trigger existing-capability comparison", () => {
     expect(selected(change("package.json", '"dependencies": {}', '"dependencies": { "left-pad": "1.3.0" }')))
-      .toEqual(["deduplication", "engineering-quality"]);
+      .toEqual(["engineering-quality"]);
   });
   test("consequential state and security changes get additional contract and test sensitivity review", () => {
     expect(selected(change("src/authorization.ts", "return true;", "return user.allowed;")))
@@ -54,7 +56,7 @@ describe("specialists selected from changed review needs", () => {
     const file = change("src/main.ts", "return 1;", "return 2;");
     const lock = change("bun.lock", "old", "new");
     for (const candidate of [{ ...file, patch: null }, { ...file, additions: 2 }, { ...file, path: "custom-format" }, { ...lock, patch: null }, { ...lock, additions: 2 }]) {
-      expect(selected(candidate)).toEqual(["deduplication", "claim-and-specification", "engineering-quality", "test-against-spec", "writing-quality", "test-health"]);
+      expect(selected(candidate)).toEqual(["claim-and-specification", "engineering-quality", "test-against-spec", "writing-quality", "test-health"]);
     }
   });
   test("public roots still select discoverability and all decisions retain their reason", () => {

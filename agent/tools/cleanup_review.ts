@@ -1,7 +1,8 @@
+import { outsideReviewWork } from "../lib/review-capabilities";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-export default defineTool({
+export const reviewTool = defineTool({
   description:
     "Remove the closed pull request's inspected workspace and stop its isolated sandbox. Use only for the cleanup operation selected by trusted GitHub lifecycle context.",
   inputSchema: z.object({}),
@@ -31,3 +32,5 @@ export default defineTool({
     return { cleaned: true, sandboxId: sandbox.id };
   },
 });
+
+export default outsideReviewWork(reviewTool);

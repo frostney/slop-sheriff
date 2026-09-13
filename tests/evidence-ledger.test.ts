@@ -22,7 +22,7 @@ import {
 import { writeReviewEvidenceManifest } from "../src/review/evidence-bundle";
 import { countPatchTokens, prepareReviewEvidence } from "../src/review/prepare-review-evidence";
 import { localWorkspaceReceiptPath, physicalWorkspaceReceipt } from "../src/review/physical-workspace";
-import readReviewEvidenceTool from "../agent/tools/read_review_evidence";
+import { reviewTool as readReviewEvidenceTool } from "../agent/tools/read_review_evidence";
 import { withTrustedReviewContext } from "../src/github/trusted-context";
 import { parseReviewConfig } from "../src/config/review-config";
 import { commonWorkFixture } from "./common-work-fixture";

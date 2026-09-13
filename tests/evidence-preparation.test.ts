@@ -11,6 +11,8 @@ import { readLaneReviewEvidencePacket } from "../src/review/lane-evidence";
 import { reviewAxes } from "../src/review/axes";
 import { digestCommonWorkValue } from "../src/review/common-work";
 import { localWorkspaceReceiptPath } from "../src/review/physical-workspace";
+import { reviewWorkPlanPath } from "../src/review/work-plan";
+import { preparedReviewWorkPlanSchema } from "../src/review/prepare-review-work";
 
 async function git(cwd: string, ...args: string[]) {
   const child = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -195,6 +197,18 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
     expect(new Map([...files].filter(([path]) => path !== localWorkspaceReceiptPath))).toEqual(savedEvidence);
     expect(await prepareReviewEvidence(restoredRuntime, trusted,
       paths.map(path => ({ path, status: "modified" })), restorationInput)).toEqual(ledger);
+    expect(environmentInventories).toBe(2);
+    expect(tokenRequests).toBe(2);
+    // A runtime upgrade can restore an existing ledger that predates work units.
+    // Prepare the missing plan without recollecting GitHub, memory or the checkout.
+    expect(await restoredRuntime.readTextFile({ path: reviewWorkPlanPath(trusted.patchFingerprint) })).toBeNull();
+    expect(await prepareReviewEvidence(restoredRuntime, trusted,
+      paths.map(path => ({ path, status: "modified" })), {
+        ...restorationInput,
+        work: { decisions: [{ axis: "engineering-quality", selected: true, reason: "Core review", paths }], claim: "Update the supplied artifacts." },
+      })).toEqual(ledger);
+    const workPlan = preparedReviewWorkPlanSchema.parse(JSON.parse((await restoredRuntime.readTextFile({ path: reviewWorkPlanPath(trusted.patchFingerprint) }))!));
+    expect(workPlan.units.flatMap(unit => unit.paths).sort()).toEqual([...paths].sort());
     expect(environmentInventories).toBe(2);
     expect(tokenRequests).toBe(2);
     const changedManifest = structuredClone(manifest);

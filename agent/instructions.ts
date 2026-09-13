@@ -11,9 +11,9 @@ export default defineDynamic({
       return defineInstructions({
         // Eve resolves this before appending the incoming child routing message.
         // The workflow supplies task policy; later turns have a durable bound route.
-        content: reviewVoiceInstructions(reviewConfigFromAuth(ctx.session.auth.current)) + "\n\n" + (ctx.channel.kind === "subagent"
+        content: ctx.channel.kind === "subagent"
           ? route ? reviewInstructions(route) : reviewChildInstructions()
-          : reviewInstructions({ role: "coordinator", attempt: 0 })),
+          : reviewVoiceInstructions(reviewConfigFromAuth(ctx.session.auth.current)) + "\n\n" + reviewInstructions({ role: "coordinator", attempt: 0 }),
       });
     },
   },

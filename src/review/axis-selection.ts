@@ -63,7 +63,7 @@ export function selectReviewAxes(files: readonly PatchFile[], publicRoots: reado
     if (!tests && (manifest.test(path) && added.trim() || /(?:^|\/)(?:utils?|helpers?|common|shared|adapters?)(?:\/|[._-])/.test(path) && code.trim())) {
       select("deduplication", path, "New dependency or shared abstraction needs comparison with existing capabilities.");
     }
-    if (!tests && code.trim() && risk.test(`${path}\n${code}`)) {
+    if (!tests && !docs && code.trim() && risk.test(`${path}\n${code}`)) {
       select("claim-and-specification", path, "Security, persistence, parsing or concurrency behavior needs focused contract review.");
       select("test-health", path, "Consequential failure behavior needs independent regression sensitivity checks.");
     }
@@ -75,8 +75,10 @@ export function selectReviewAxes(files: readonly PatchFile[], publicRoots: reado
   }
   if (!reasons.has("engineering-quality")) reasons.set("engineering-quality", new Map());
   const builtIns = reviewAxes.map((axis) => ({
-    axis, selected: reasons.has(axis),
-    reason: reasons.has(axis)
+    axis, selected: axis !== "deduplication" && reasons.has(axis),
+    reason: axis === "deduplication"
+      ? "Reuse, dependency cost and duplicated design are assessed within each core technical component."
+      : reasons.has(axis)
       ? [...new Set(reasons.get(axis)!.values())].join(" ") || "Core review checks the supplied scope."
       : "No separate specialist obligation was found in the changed content; the core review retains overall correctness, claims and reuse.",
     paths: [...(reasons.get(axis)?.keys() ?? [])],

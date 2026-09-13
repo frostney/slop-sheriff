@@ -1,7 +1,7 @@
 import { reviewPolicyDigest } from "../src/config/review-policy-identity";
 import { expect, spyOn, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
-import assembleTool from "../agent/tools/assemble_review_report";
+import { reviewTool as assembleTool } from "../agent/tools/assemble_review_report";
 import * as adapters from "../src/github/chat-adapter";
 import * as evidence from "../agent/lib/review-evidence";
 import { reviewReportState } from "../agent/lib/review-report";
@@ -11,6 +11,9 @@ import { advanceReviewRecovery, beginReviewRecovery, type ReviewRecoveryState } 
 import { withTrustedReviewContext } from "../src/github/trusted-context";
 import { authenticatedEvidenceSandbox } from "../src/review/authenticated-evidence";
 import { writeLaneCheckpoint } from "../src/review/lane-checkpoint";
+import { workOrchestrationFixture } from "./work-orchestration-fixture";
+import { reviewWorkPlanPath } from "../src/review/work-plan";
+import * as workStorage from "../src/review/work-storage";
 
 // Keep Eve's durable state and GitHub HTTP injectable; execute the real tool,
 // canonical assembler, signed checkpoint reader, and publication staging path.
@@ -45,6 +48,14 @@ test("staging failure retains reconciliation work until GitHub has the report", 
   const secret = process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY;
   process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY = "ef".repeat(32);
   const signed = authenticatedEvidenceSandbox(sandbox, "root", process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY);
+  const work = workOrchestrationFixture(["engineering-quality"]);
+  const prepared = { ...work.plan.prepared, baseSha: identity.baseSha, headSha: identity.headSha, patchFingerprint: identity.patchFingerprint,
+    reportRepositoryDigest: "f".repeat(64), units: work.plan.prepared.units.map(unit => ({ ...unit, status: "reused" as const, reusableAssessment: work.assessments.get(unit.id)! })) };
+  await signed.writeTextFile({ path: reviewWorkPlanPath(identity.patchFingerprint), content: JSON.stringify(prepared) });
+  const savedAssociations: string[] = [];
+  const workStore = spyOn(workStorage, "completedReviewWorkStore").mockReturnValue({
+    async put(value) { savedAssociations.push(value.data); return "stored" as const; }, async get() { return null; }, async latest() { return null; },
+  });
   const draft = {
   actionSummary: "Reviewed the affected publication paths and retained the observed evidence.", additionalConcerns: [],
     scope: { claim: "Review retry behavior", dirtyState: "clean" },
@@ -69,7 +80,7 @@ test("staging failure retains reconciliation work until GitHub has the report", 
     if (!execute) throw new Error("Assembly tool must have an executor");
     const auth = withTrustedReviewContext({
       principalId: "fixture", principalType: "user", authenticator: "github",
-      attributes: { installation_id: "1", repository: "acme/repo", pull_request_number: "1" },
+      attributes: { installation_id: "1", repository: "acme/repo", pull_request_number: "1", delivery_id: "fixture-attempt" },
     }, {
       ...identity, configSource: "", event: "opened", repositoryDatabaseId: 1, repositoryCreatedAt: 0,
       plan: JSON.stringify({ ...identity, kind: "full" }), reviewFiles: [],
@@ -88,16 +99,18 @@ test("staging failure retains reconciliation work until GitHub has the report", 
     expect(writes).toBe(0);
     expect(report?.report).toBeNull();
     expect(recovery?.stage).toBe("axes-complete");
-    await expect(execute({ draft }, ctx)).rejects.toThrow();
+    await expect(execute({ draft }, ctx)).rejects.toThrow("temporary fixture failure");
     expect(writes).toBe(1);
+    expect(savedAssociations).toHaveLength(1);
     expect(recovery?.stage).toBe("axes-complete");
     expect(report?.report).not.toBeNull();
     rejectWrite = false;
     expect(await execute({ draft }, ctx)).toMatchObject({ staged: true, recoveryStage: "report-reconciled" });
     expect(recovery?.stage).toBe("report-reconciled");
     expect(writes).toBe(2);
+    expect(savedAssociations).toEqual([savedAssociations[0]!, savedAssociations[0]!]);
   } finally {
-    for (const mock of [readReport, writeReport, readRecovery, writeRecovery, readIdentity, adapter]) mock.mockRestore();
+    for (const mock of [readReport, writeReport, readRecovery, writeRecovery, readIdentity, adapter, workStore]) mock.mockRestore();
     if (secret === undefined) delete process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY;
     else process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY = secret;
   }

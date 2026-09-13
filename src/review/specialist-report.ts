@@ -1,16 +1,18 @@
 import type { LaneCompletedReport } from "./lane-checkpoint";
 import type { ReviewReportDraft } from "./report-assembly";
+import type { ReviewFinding } from "./findings";
 
 /** Signed specialist evidence reaches publication even when coordinator prose omits it. */
-export function retainSpecialistEvidence(draft: ReviewReportDraft, reports: readonly LaneCompletedReport[]): ReviewReportDraft {
+export function retainSpecialistEvidence(draft: ReviewReportDraft, reports: readonly LaneCompletedReport[], retainedFindings: readonly ReviewFinding[] = []): ReviewReportDraft {
   const probes = [...draft.probes];
   const limitations = new Set(draft.limitations);
   const staticOnly = new Set(draft.coverage.staticOnly);
   const unreached = new Set(draft.coverage.unreached);
   for (const report of reports) {
     for (const check of report.requirementChecks ?? []) {
-      if (check.status === "failed" && !draft.freshFindings.some((finding) =>
-        finding.category === "CLAIM" && (finding.severity === "BLOCKING" || finding.severity === "IMPORTANT") && finding.requirementIds.includes(check.sourceId))) {
+      const materialFindings = [...draft.freshFindings, ...retainedFindings.filter(finding => finding.status !== "fixed" && !finding.dismissal)];
+      if (check.status === "failed" && !materialFindings.some((finding) =>
+        finding.category === "CLAIM" && (finding.severity === "BLOCKING" || finding.severity === "IMPORTANT") && finding.requirementIds?.includes(check.sourceId))) {
         throw new Error(`Failed requirement ${check.sourceId} must remain a material claim finding`);
       }
       const label = `${report.axis}: ${check.requirement} [${check.status}; ${check.sourceId}; ${check.obligationId ?? "document context"}]`;

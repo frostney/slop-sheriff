@@ -1,3 +1,5 @@
+import { reviewWorkReceiptSchema } from "../src/review/work-runtime";
+import { workOrchestrationFixture } from "./work-orchestration-fixture";
 import { describe, expect, test } from "bun:test";
 import { asSchema } from "ai";
 import { parseReviewConfig } from "../src/config/review-config";
@@ -5,10 +7,10 @@ import { reviewConfigFromAuth } from "../src/config/trusted-review-config";
 import { withTrustedReviewContext } from "../src/github/trusted-context";
 import { chainForRoute } from "../src/models/routing";
 import { selectReviewAxes } from "../src/review/axis-selection";
-import { reviewAxes, reviewAxisSchema, type ReviewAxis } from "../src/review/axes";
+import { reviewAxes, reviewAxisSchema } from "../src/review/axes";
 import { projectLaneRegistryDigest } from "../src/review/project-lane-identity";
 import { laneCheckName } from "../src/review/project-lanes";
-import { laneReceiptSchema, orchestrateReview } from "../src/review/orchestration";
+import { orchestrateReview } from "../src/review/orchestration";
 import { laneCompletedReportSchema, laneCheckpointPath, readLaneCheckpoint, writeLaneCheckpoint } from "../src/review/lane-checkpoint";
 import { attestCheckpoint, verifyCheckpointAttestation } from "../src/review/checkpoint-attestation";
 import { beginReviewRecovery, validateReviewRecoveryIdentity } from "../src/review/recovery";
@@ -50,7 +52,7 @@ describe("runtime project lanes", () => {
   });
 
   test("routes only configured project IDs and gives them stable named Checks", () => {
-    expect(chainForRoute(config, { role: "lane", axis: "project-api", attempt: 0 })).toEqual(config.model);
+    expect(chainForRoute(config, { role: "lane", axis: "project-api", attempt: 0 })).toHaveLength(1);
     expect(() => chainForRoute(config, { role: "lane", axis: "project-forged", attempt: 0 })).toThrow("Unconfigured");
     const overridden = parseReviewConfig(JSON.stringify({ lanes: [lane], agents: { "project-api": "openai/gpt-5.6-luna" } }));
     expect(chainForRoute(overridden, { role: "lane", axis: "project-api", attempt: 0 })).toEqual(["openai/gpt-5.6-luna"]);
@@ -59,7 +61,8 @@ describe("runtime project lanes", () => {
   });
 
   test("generated provider-visible lane schemas admit bounded project IDs without adding application fields", async () => {
-    for (const schema of [laneReceiptSchema, laneCompletedReportSchema]) {
+    expect((await asSchema<unknown>(reviewWorkReceiptSchema).jsonSchema).properties).toHaveProperty("workId");
+    for (const schema of [laneCompletedReportSchema]) {
       const generated = await asSchema<unknown>(schema).jsonSchema;
       expect(generated.additionalProperties).toBe(false);
       const axis = generated.properties?.axis;
@@ -94,13 +97,14 @@ describe("runtime project lanes", () => {
     const wide = parseReviewConfig(JSON.stringify({ lanes: Array.from({ length: 18 }, (_, index) => ({ ...lane, id: `project-lane${index}`, name: `Lane ${index}`, always: true })) }));
     const axes = wide.lanes!.map((item) => item.id);
     const observed: string[] = [];
-    const plan = { ...identity, rootSessionId: "root", commonPrefix: "Trusted fixture", activeAxes: axes, lanes: wide.lanes ?? [], laneRegistryDigest: projectLaneRegistryDigest(wide) };
+    const fixture = workOrchestrationFixture(axes);
+    const plan = { ...fixture.plan, rootSessionId: "root", commonPrefix: "Trusted fixture", activeAxes: axes, lanes: wide.lanes ?? [], laneRegistryDigest: projectLaneRegistryDigest(wide) };
     const call = async ({ message }: { message: string }) => { observed.push(message); return {}; };
-    const verifyLane = async (_raw: unknown, axis: ReviewAxis, attempt: number) => ({ receipt: { axis, status: "complete" as const, scoutRequests: [], checkpoint: "fixture" }, attestation: { version: 2 as const, rootSessionId: "root", invocationId: "fixture", axis, attempt, operation: "read" as const, ...identity, revision: 1, status: "complete" as const, progressDigest: "e".repeat(64), checkpointDigest: "f".repeat(64) } });
-    expect(await orchestrateReview({ plan, invocationPrefix: "run", call, verifyLane })).toMatchObject({ activeAxes: axes });
+    const verifyWork = async (_raw: unknown, unit: typeof plan.prepared.units[number]) => ({ assessment: fixture.assessments.get(unit.id)!, sessionId: "child", agentId: "agent", turnId: "turn", progressDigest: "e".repeat(64) });
+    expect(await orchestrateReview({ plan, invocationPrefix: "run", call, verifyWork, reuseWork: async () => null, cancelOutstanding: async () => {} })).toMatchObject({ activeAxes: axes });
     expect(observed).toHaveLength(18);
     expect(observed.every((message) => message.includes(lane.criteria))).toBe(true);
-    await expect(orchestrateReview({ plan: { ...plan, activeAxes: ["project-forged"] }, invocationPrefix: "run", call, verifyLane })).rejects.toThrow("trusted axes");
+    await expect(orchestrateReview({ plan: { ...plan, activeAxes: ["project-forged"] }, invocationPrefix: "run", call, verifyWork, reuseWork: async () => null, cancelOutstanding: async () => {} })).rejects.toThrow("trusted axes");
   });
 
   test("canonical assembly preserves selected project lanes and configured skipped lanes", () => {

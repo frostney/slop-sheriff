@@ -27,9 +27,9 @@ flowchart TD
   D -->|"Reviewable"| B{"Completed baseline?"}
   B -->|"No, first review"| F["Full review once"]
   B -->|"Baseline lost"| L["Fail closed; wait for authorized manual full"]
-  B -->|"Yes"| P{"Effective patch changed?"}
-  P -->|"No; merge or rebase only"| R["Reuse evidence; publish current-head Check"]
-  P -->|"Yes"| Q["Exact-file delta review plus prior-finding revalidation"]
+  B -->|"Yes"| Q["Validate current component and requirement inputs"]
+  Q --> R["Reuse valid assessments; review changed work"]
+  R --> P["Reconcile findings and publish current status"]
   M["Authorized manual full command"] --> F
 ```
 
@@ -37,15 +37,14 @@ flowchart TD
 - A draft becoming ready starts its first full review immediately.
 - New commits during the debounce reset it. A new event steers and cancels
   stale active Eve work.
-- After the first successful full review, only semantic delta files are freshly
-  reviewed. Every open Blocking/Important finding and relevant Improvement or
-  Nitpick is revalidated; other presentation-only findings are carried forward.
-- Merge and rebase SHA churn is compared by normalized effective patch. A
-  semantic no-op does not call a model and does not start another review; it
-  only creates or updates the required Check on the current head.
-- A missing, malformed, or failed baseline never triggers an automatic
-  replacement full review. A write/maintain/admin user can explicitly request
-  one with `@slop-sheriff run full review`.
+- Every update checks the complete current PR scope. Completed assessments survive
+  pushes before publication, and changed components receive the update since their
+  previously assessed head plus retained evidence.
+- Matching diff text is not sufficient proof for a rebase. Source dependencies,
+  requirement clauses and test observations determine reuse.
+- A known interrupted initial review retains completed work. Missing or corrupted
+  canonical state fails closed; a repository writer can explicitly request
+  `@slop-sheriff run full review` when recovery cannot establish authority.
 - A current-head failure with validated checkpoints retains a sanitized retry
   envelope. An authorized `@slop-sheriff continue` resumes only recorded
   missing stages in the same durable session; mismatched or ineligible state
@@ -65,7 +64,7 @@ outboxes and cost accounting. Separate cross-PR memory through `@convex-dev/rag`
 is advisory; it cannot change the verdict, baseline or finding status. Recent matches remain individual while older matches collapse
 to bounded semantic-cluster representatives after the repository has enough
 review history. The GitHub state allows the next webhook to distinguish the
-first review, an exact delta, a semantic no-op, and a lost baseline.
+first review, a current update, and a lost baseline.
 
 ## Trusted repository configuration
 
@@ -87,23 +86,21 @@ publicRoots:
   - website
 ```
 
-`model` defaults to this ordered AI Gateway fallback chain:
+Unconfigured tasks use candidate task-specific routing: Luna with low reasoning
+for triage/presentation and medium for analysis, verification and adjudication;
+explicit ambiguity can escalate to Sol. These candidates still require the
+[quality and complete-lifecycle cost evaluation](docs/validation/review-quality.md).
+The target is under $1 for a routine PR lifecycle, never a runtime cutoff.
 
-- `openai/gpt-5.6-sol`
-- `moonshotai/kimi-k3`
-- `anthropic/claude-opus-5`
-
-Any currently listed AI Gateway language model with tool use is accepted;
-there is no model allowlist. Comma-separated IDs form an ordered fallback
-chain. `agents` is optional: a string applies one chain to every subagent,
-while a mapping can override project-owned review axes without creating a
-second lane system. `scout` defaults to `openai/gpt-5.6-luna` with xhigh
-reasoning and can be overridden like the axes:
+An explicit `model` preserves that ordered Gateway chain. `agents` can override
+all subagents or individual review categories; `tasks` can override model and
+reasoning by task. Current Gateway language models must support tool use.
+Dependency and duplicate-design concerns now belong to the core technical
+assessment, so a separate deduplication worker is not dispatched.
 
 ```yaml
 model: openai/gpt-5.6-sol, anthropic/claude-opus-5
 agents:
-  deduplication: moonshotai/kimi-k3, openai/gpt-5.6-sol
   claim-and-specification: anthropic/claude-opus-5
   engineering-quality: openai/gpt-5.6-sol
   discoverability: moonshotai/kimi-k3

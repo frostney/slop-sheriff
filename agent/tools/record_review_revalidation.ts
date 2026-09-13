@@ -1,3 +1,4 @@
+import { outsideReviewWork } from "../lib/review-capabilities";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { readLatestReviewState } from "../../src/github/publication";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
@@ -23,7 +24,7 @@ import { recordReviewRevalidationInputSchema } from "../../src/review/tool-input
 
 export { recordReviewRevalidationInputSchema } from "../../src/review/tool-inputs";
 
-export default defineTool({
+export const reviewTool = defineTool({
   description:
     "Persist the complete typed outcomes for every application-selected prior finding. The application validates exact finding IDs and advances revalidation recovery. Values are retained in durable session state for report assembly and recovery.",
   inputSchema: recordReviewRevalidationInputSchema,
@@ -75,3 +76,5 @@ export default defineTool({
     return toolOutput.json(output);
   },
 });
+
+export default outsideReviewWork(reviewTool);

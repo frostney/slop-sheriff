@@ -5,6 +5,7 @@ import { trustedVoiceGuideAttribute } from "../config/trusted-review-config";
 import { routingAttribute } from "../models/routing";
 
 export const reviewContextAttributes = {
+  claim: "slop_sheriff_review_claim",
   baseSha: "known_good_review_base_sha",
   reviewPolicyDigest: "known_good_review_policy_digest",
   event: "known_good_review_event",
@@ -42,6 +43,7 @@ export function withTrustedReviewContext(
   values: {
     readonly baseSha: string;
     readonly configSource: string;
+    readonly claim?: string;
     readonly voiceGuideContent?: string;
     readonly event: string;
     readonly headSha: string;
@@ -64,6 +66,7 @@ export function withTrustedReviewContext(
     attributes: {
       ...attributes,
       [routingAttribute]: values.configSource,
+      [reviewContextAttributes.claim]: values.claim ?? "",
       [trustedVoiceGuideAttribute]: values.voiceGuideContent ?? "",
       [reviewContextAttributes.baseSha]: values.baseSha,
       [reviewContextAttributes.reviewPolicyDigest]: reviewPolicyDigest(values.configSource, values.baseSha),

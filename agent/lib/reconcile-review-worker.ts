@@ -3,18 +3,27 @@ import type { RouteHandlerArgs } from "eve/channels";
 import type { LifecycleJob } from "../../src/lifecycle/contracts";
 import { finishReview, heartbeatReview, lifecycleRequest, stageLifecyclePublication } from "../../src/lifecycle/client";
 import { trustedGitHubContextSchema } from "../../src/github/trusted-context";
-import { reconcileNativeWorker } from "../../src/lifecycle/native-worker";
+import { drainNativeReviewDescendants, reconcileNativeWorker } from "../../src/lifecycle/native-worker";
 
-export async function cancelDurableReview(job: LifecycleJob, context: Pick<RouteHandlerArgs, "attachSession" | "resolveSession">): Promise<void> {
+export async function cancelDurableReview(job: LifecycleJob, context: Pick<RouteHandlerArgs, "attachSession" | "resolveSession">, dependencies = {
+  drain: drainNativeReviewDescendants,
+  retireChecks: retireSupersededReviewChecks,
+  release: (attemptId: string) => lifecycleRequest("cancelled", { attemptId }),
+}): Promise<void> {
   const resolved = job.sessionId ? context.attachSession(job.sessionId) : job.continuationAddress ? await context.resolveSession(job.continuationAddress) : undefined;
   const session = resolved?.id === job.previousSessionId && !job.sessionId ? undefined : resolved;
   if (session) { await session.cancel({ tasks: true }); await session.reset({ reason: "review superseded" }); }
-  for (const childId of job.workerSessionIds ?? []) if (childId !== session?.id) {
-    await context.attachSession(childId).cancel({ tasks: true });
-    await context.attachSession(childId).reset({ reason: "parent review superseded" });
-  }
-  await retireSupersededReviewChecks(job);
-  await lifecycleRequest("cancelled", { attemptId: job.attemptId });
+  if (session) {
+    const drain = await dependencies.drain(session.id, job.workerSessionIds ?? [], async childId => {
+      const child = context.attachSession(childId);
+      await child.cancel({ tasks: true });
+      await child.reset({ reason: "parent review superseded" });
+    });
+    if (!drain.drained) throw new Error("Superseded review descendants have not reached a native scheduling fence");
+    console.log(JSON.stringify({ event: "known-good-review.supersession-drained", attemptId: job.attemptId, nativeRuns: drain.runIds, unresolvedInFlightSteps: drain.activeStepIds }));
+  } else if (job.workerSessionIds?.length) throw new Error("Cannot release superseded review capacity without its native root identity");
+  await dependencies.retireChecks(job);
+  await dependencies.release(job.attemptId);
 }
 export async function reconcileDurableReview(job: LifecycleJob, context: Pick<RouteHandlerArgs, "attachSession" | "resolveSession">): Promise<void> {
   const resolved = job.sessionId ? context.attachSession(job.sessionId) : job.continuationAddress ? await context.resolveSession(job.continuationAddress) : undefined;

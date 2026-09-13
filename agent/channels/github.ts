@@ -1,3 +1,5 @@
+import { captureReviewWorkHandles } from "../lib/native-work-handles";
+import { cancelReviewWork } from "../lib/cancel-review-work";
 import { retireLegacyReviewChecks } from "../../src/lifecycle/legacy-checks";
 import { lifecycleJobSchema } from "../../src/lifecycle/contracts";
 import { reconcileNativeWorker } from "../../src/lifecycle/native-worker";
@@ -331,13 +333,7 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
         }
       : { kind: "delta" as const, revalidatePriorFindings: true as const };
   const config = parseReviewConfig(configSource);
-  const reviewFiles = patchFiles
-    .filter(
-      (file) =>
-        activeReview.kind === "full" ||
-        deltaDispatch?.changedFiles.includes(file.path),
-    )
-    .map((file) => ({ path: file.path, status: file.status }));
+  const reviewFiles = patchFiles.map((file) => ({ path: file.path, status: file.status }));
   const reviewedPaths = reviewFiles.map((file) => file.path);
   const configuredDecisions = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), config.publicRoots, config.lanes);
   const configuredAxes = configuredDecisions
@@ -367,6 +363,7 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     configSource,
     voiceGuideContent: await fetchTrustedVoiceGuide(ctx, pullRequest.base.sha, configSource),
     event: "review-control-response",
+    claim: JSON.stringify({ title: pullRequest.title ?? "", body: pullRequest.body ?? "" }),
     ...(memoryAdmission ? { memoryAdmission } : {}),
     headSha: pullRequest.head.sha,
     patchFingerprint,
@@ -520,43 +517,13 @@ async function dispatchReview(input: {
     });
     return null;
   }
-  if (dispatch.plan.kind === "reuse") {
-    if (!dispatch.priorReport || !dispatch.patchFingerprint) {
-      await publishFailClosedCheck({
-        context,
-        message: "Semantic reuse was selected without a valid prior findings artifact.",
-        octokit,
-      });
-      return null;
-    }
-    await publishReview({
-      config: reviewConfig,
-      context,
-      octokit,
-      reconcileFindings: false,
-      report: {
-        ...dispatch.priorReport,
-        generatedAt: new Date().toISOString(),
-        scope: {
-          ...dispatch.priorReport.scope,
-          base: pullRequest.base.sha,
-          head: pullRequest.head.sha,
-        },
-        limitations: [
-          ...dispatch.priorReport.limitations,
-          "Evidence reused after a merge or rebase changed commit identity without changing the effective pull-request patch.",
-        ],
-      },
-    });
-    return null;
-  }
   if (dispatch.plan.kind !== "full" && dispatch.plan.kind !== "delta") {
     return null;
   }
 
-  const reviewedPaths = dispatch.plan.kind === "delta"
-    ? dispatch.changedFiles
-    : patchFiles.map((file) => file.path);
+  // Current-head coverage covers the entire PR. Persistent work validity,
+  // rather than a published baseline's file filter, selects actual model work.
+  const reviewedPaths = patchFiles.map((file) => file.path);
   const axisDecisions = selectReviewAxes(patchFiles.filter((file) => reviewedPaths.includes(file.path)), reviewConfig.publicRoots, reviewConfig.lanes);
   const activeAxes = axisDecisions.filter((decision) => decision.selected).map((decision) => decision.axis);
   const skippedAxes = reviewLaneRegistry(reviewConfig).map((lane) => lane.id).filter((axis) => !activeAxes.includes(axis));
@@ -613,6 +580,7 @@ async function dispatchReview(input: {
   const auth = withTrustedReviewContext(defaultGitHubAuth(input.ctx), {
     baseSha: pullRequest.base.sha,
     configSource,
+    claim: JSON.stringify({ title: pullRequest.title ?? "", body: pullRequest.body ?? "" }),
     voiceGuideContent: await fetchTrustedVoiceGuide(input.ctx, pullRequest.base.sha, configSource),
     event: input.action,
     ...(memoryAdmission ? { memoryAdmission } : {}),
@@ -628,13 +596,7 @@ async function dispatchReview(input: {
       baselineHead: dispatch.plan.kind === "delta" ? dispatch.priorReport?.scope.head : null,
     }),
     ...repositoryDetails,
-    reviewFiles: patchFiles
-      .filter(
-        (file) =>
-          dispatch.plan.kind !== "delta" ||
-          dispatch.changedFiles.includes(file.path),
-      )
-      .map((file) => ({ path: file.path, status: file.status })),
+    reviewFiles: patchFiles.map((file) => ({ path: file.path, status: file.status })),
   });
   return {
     auth,
@@ -858,7 +820,9 @@ export default {
       if (!authenticatedLifecycleRequest(request)) return new Response("unauthorized", { status: 401 });
       const attemptId = request.headers.get("x-review-attempt");
       const operation = request.headers.get("x-review-operation");
-      const job = attemptId ? await inspectReview(attemptId, (operation === "cancel" || operation === "recover")) : null;
+      const job = attemptId ? await inspectReview(attemptId, (operation === "cancel" || operation === "recover" || operation === "cancel-work")) : null;
+      if (job && operation === "work-handles") { const input = z.strictObject({ rootSessionId: z.string().min(1) }).parse(await request.json()); const handles = await captureReviewWorkHandles(job, input.rootSessionId, context); return Response.json({ handles }); }
+      if (job && operation === "cancel-work") { await cancelReviewWork(job, await request.json(), context); return Response.json({ cancelled: true }); }
       if (job && operation === "recover") return Response.json({ recovered: await recoverInterruptedReview(job, context, request.headers.get("x-review-key-budget-repaired") === "true") });
       if (job && operation === "cancel") { await cancelDurableReview(job, context); return Response.json({ cancelled: true }); }
       if (job && operation === "reconcile") { await reconcileDurableReview(job, context); return Response.json({ reconciled: true }); }

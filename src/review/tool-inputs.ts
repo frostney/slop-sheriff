@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { reviewFindingRevalidationSchema } from "./findings";
-import { reviewReportDraftSchema } from "./report-assembly";
+import { reviewAdjudicationDraftSchema } from "./adjudication";
 
 export const assembleReviewReportInputSchema = z
   .strictObject({
-    draft: reviewReportDraftSchema,
+    draft: reviewAdjudicationDraftSchema,
   });
 
 export const recordReviewRevalidationInputSchema = z

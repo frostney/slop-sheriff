@@ -41,27 +41,43 @@ export function createCostTelemetry(input: {
   scope: () => CostExecutionScope | null;
   record: (observation: CostObservation) => Promise<void>;
 }): Telemetry {
-  const calls = new Map<string, { observation: CostObservation; retries: number }>();
+  type Attempt = { observation: CostObservation };
+  type Call = { stepNumber: number; retries: number; transports: number; current?: Attempt };
+  // SDK callId identifies the entire generation, including all tool-loop steps.
+  const calls = new Map<string, Call>();
   return {
+    onStepStart({ callId, stepNumber }) {
+      const call = calls.get(callId);
+      if (call) {
+        if (call.stepNumber !== stepNumber) { call.stepNumber = stepNumber; call.retries = -1; }
+      } else calls.set(callId, { stepNumber, retries: -1, transports: 0 });
+    },
     async executeLanguageModelCall({ callId, execute, modelId, functionId, tools }) {
       const scope = input.scope();
-      if (!scope) return execute();
-      const retries = (calls.get(callId)?.retries ?? -1) + 1;
+      if (!scope) {
+        const call = calls.get(callId);
+        if (call) delete call.current;
+        return execute();
+      }
+      const call = calls.get(callId) ?? { stepNumber: 0, retries: -1, transports: 0 };
+      calls.set(callId, call);
+      const retries = ++call.retries;
+      const transport = call.transports++;
       const observation: CostObservation = {
-        ...scope, eventId: `sdk:${callId}:${retries}`, modelAttemptId: callId, modelAttemptIndex: retries,
+        ...scope, eventId: `sdk:${callId}:${call.stepNumber}:${transport}`, modelAttemptId: `${callId}:step:${call.stepNumber}`, modelAttemptIndex: retries,
         phase: functionId === "eve.compaction" ? "compaction" : scope.phase,
         requestedModel: modelId ?? "unknown", actualModel: modelId ?? null,
         outcome: "started", generationId: null, inputTokens: null, outputTokens: null,
         cacheReadTokens: null, cacheWriteTokens: null, sdkCostUsd: null,
       };
-      calls.set(callId, { observation, retries });
+      // Stream callbacks retain their own attempt even after the next step starts.
+      const attempt: Attempt = { observation };
+      call.current = attempt;
       // Await durable admission before invoking a potentially billable provider.
-      try { await input.record(observation); }
-      catch (error) { calls.delete(callId); throw error; }
+      await input.record(observation);
       const update = async (next: CostObservation) => {
-        const previous = calls.get(callId)?.observation ?? observation;
-        if (JSON.stringify(previous) === JSON.stringify(next)) return;
-        calls.set(callId, { observation: next, retries });
+        if (JSON.stringify(attempt.observation) === JSON.stringify(next)) return;
+        attempt.observation = next;
         await input.record(next);
       };
       try {
@@ -74,12 +90,12 @@ export function createCostTelemetry(input: {
               try {
                 const chunk = await reader.read();
                 if (chunk.done) { controller.close(); return; }
-                await update(providerObservation(calls.get(callId)?.observation ?? observation, chunk.value));
+                await update(providerObservation(attempt.observation, chunk.value));
                 validateToolInput(chunk.value);
                 controller.enqueue(chunk.value);
               } catch (error) {
                 try {
-                  await update({ ...(calls.get(callId)?.observation ?? observation), outcome: "failed" });
+                  await update({ ...attempt.observation, outcome: "failed" });
                 } finally {
                   // Stop upstream work even when recording the failure also fails.
                   await reader.cancel(error).catch(() => {});
@@ -89,7 +105,7 @@ export function createCostTelemetry(input: {
             },
             async cancel(reason) {
               try {
-                await update({ ...(calls.get(callId)?.observation ?? observation), outcome: "failed" });
+                await update({ ...attempt.observation, outcome: "failed" });
               } finally {
                 await reader.cancel(reason);
               }
@@ -100,36 +116,39 @@ export function createCostTelemetry(input: {
         await update(providerObservation(observation, result));
         return result;
       } catch (error) {
-        const current = calls.get(callId)?.observation ?? observation;
+        const current = attempt.observation;
         const gatewayError = GatewayError.isInstance(error) ? error : null;
         const generationId = gatewayError?.generationId ?? current.generationId;
         const rejected = !generationId && gatewayError && (GatewayAuthenticationError.isInstance(error) && gatewayError.statusCode === 401 ? "gateway-authentication" as const : gatewayError.statusCode === 402 && !GatewayResponseError.isInstance(error) ? "gateway-payment-required" as const : null);
         const failed = { ...current, generationId, outcome: "failed" as const, ...(rejected ? { nonbillableFailure: rejected } : {}) };
-        calls.set(callId, { observation: failed, retries });
+        attempt.observation = failed;
         await input.record(failed);
         throw error;
       }
     },
     async onLanguageModelCallEnd(event) {
-      const call = calls.get(event.callId);
+      const call = calls.get(event.callId)?.current;
       if (!call) return;
       const gateway = event.providerMetadata?.gateway;
       const generationId = typeof gateway?.generationId === "string" ? gateway.generationId : null;
       const rawCost = gateway?.cost;
       const cost = typeof rawCost === "number" || (typeof rawCost === "string" && rawCost.trim() !== "") ? Number(rawCost) : NaN;
-      await input.record({
+      call.observation = {
         ...call.observation, outcome: call.observation.outcome === "failed" ? "failed" : "succeeded", actualModel: event.modelId, generationId: generationId ?? call.observation.generationId,
         inputTokens: event.usage.inputTokens ?? call.observation.inputTokens, outputTokens: event.usage.outputTokens ?? call.observation.outputTokens,
         cacheReadTokens: event.usage.inputTokenDetails.cacheReadTokens ?? call.observation.cacheReadTokens,
         cacheWriteTokens: event.usage.inputTokenDetails.cacheWriteTokens ?? call.observation.cacheWriteTokens,
         sdkCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : call.observation.sdkCostUsd,
-      });
-      calls.delete(event.callId);
+      };
+      await input.record(call.observation);
     },
-    onError() {
-      // Terminal errors release in-process correlation; durable rows remain.
-      // Only failed calls are removed so concurrent successful streams keep their identity.
-      for (const [id, call] of calls) if (call.observation.outcome === "failed") calls.delete(id);
+    onEnd({ callId }) { calls.delete(callId); },
+    onAbort({ callId }) { calls.delete(callId); },
+    onError(event) {
+      // Installed SDK terminal error events carry callId. Never clear another
+      // concurrent generation's retry identity because one operation failed.
+      const parsed = z.object({ callId: z.string() }).safeParse(event);
+      if (parsed.success) calls.delete(parsed.data.callId);
     },
   };
 }

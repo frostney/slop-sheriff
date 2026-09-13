@@ -1,6 +1,6 @@
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineHook } from "eve/hooks";
-import { toolResultFrom } from "eve/tools";
+import { reviewToolResult } from "../lib/review-tool-results";
 import { z } from "zod";
 import { parseReviewConfig } from "../../src/config/review-config";
 import { githubAdapter } from "../../src/github/chat-adapter";
@@ -10,17 +10,20 @@ import {
   reviewContextAttributes,
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
-import verifyReviewHeadTool from "../tools/verify_review_head";
+import { verifyReviewHeadOutputSchema } from "../tools/verify_review_head";
 import { retrieveReviewMemory } from "../../src/memory/client";
 import { routingAttribute } from "../../src/models/routing";
+import { reviewAxisSchema } from "../../src/review/axes";
 
-const reviewPlanSchema = z.object({ kind: z.enum(["full", "delta"]) });
+const reviewPlanSchema = z.object({ kind: z.enum(["full", "delta"]), axisDecisions: z.array(z.object({
+  axis: reviewAxisSchema, selected: z.boolean(), reason: z.string(), paths: z.array(z.string()),
+})) });
 
 export default defineHook({
   events: {
     async "action.result"(event, ctx) {
-      const verified = toolResultFrom(event.data.result, verifyReviewHeadTool);
-      if (!verified?.output.valid || ctx.session.parent) return;
+      const verified = reviewToolResult(event.data.result, "verify_review_head", verifyReviewHeadOutputSchema);
+      if (!verified?.valid || ctx.session.parent) return;
       const trusted = trustedGitHubContext(ctx.session.auth.current);
       if (!trusted.repositoryDatabaseId) {
         throw new Error(
@@ -54,6 +57,7 @@ export default defineHook({
         JSON.parse(rawFiles),
         {
           config,
+          work: { decisions: plan.axisDecisions, claim: String(ctx.session.auth.current?.attributes[reviewContextAttributes.claim] ?? "") },
           planKind: plan.kind,
           collectMemory: (query) =>
             retrieveReviewMemory({

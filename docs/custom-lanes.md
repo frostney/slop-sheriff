@@ -88,10 +88,10 @@ base, limited to 16,000 bytes, and affect wording only. They cannot change evide
 severity, verification requirements or recommendations. `voiceGuideContent` is
 application-owned and is rejected in configuration.
 
-The saved baseline also binds normalized configuration and the exact base revision
-for built-in-only reviews. Changed voice, models, requirement paths, project lanes,
-or base advancement triggers a new full review even when the effective PR patch is
-unchanged. Base advancement is intentionally conservative because unchanged
-requirements and reference files may have changed. Old baselines without this
-digest require one full review after upgrading. This behavior makes no performance
-improvement claim for semantic rebases across different base revisions.
+The saved baseline binds canonical publication identity. Technical work has its
+own semantic dependency identity, so voice, unrelated model configuration and
+publication changes do not automatically discard it. Every update validates the
+current component, requirement and supporting evidence inputs, including rebases.
+Changed project criteria invalidate that lane's work; changed sources invalidate
+assessments that depend on them. A legacy baseline does not bypass this validation.
+See [the architecture](architecture.md) and [task model configuration](validation/review-quality.md).

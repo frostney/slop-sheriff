@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { reviewExecutionReferencesSchema } from "./execution-reference";
 import type { ReviewAxis } from "./axes";
 import { reviewAxisSchema } from "./axes";
 import {
@@ -21,9 +22,11 @@ const laneReportCandidateSchema = reviewFindingEvidenceSchema
   .extend({
     churn: findingChurnSchema.nullable(),
     uncertainty: z.array(boundedReportText).max(12),
+    evidenceRefs: reviewExecutionReferencesSchema.optional(),
   });
 
 export const specialistCheckSchema = z.strictObject({
+  evidenceRefs: reviewExecutionReferencesSchema.optional(),
   entries: z.array(z.number().int().nonnegative()).min(1).max(2_000),
   requirement: boundedReportText,
   source: boundedReportText,
@@ -35,6 +38,7 @@ export const specialistCheckSchema = z.strictObject({
 });
 
 export const requirementCheckSchema = z.strictObject({
+  evidenceRefs: reviewExecutionReferencesSchema.optional(),
   sourceId: z.string().regex(/^req-[a-f0-9]{24}$/),
   obligationId: z.string().regex(/^ob-[a-f0-9]{24}$/).nullable(),
   requirement: boundedReportText,
@@ -75,6 +79,7 @@ export const laneCompletedReportSchema = z
           .strictObject({
             commandOrAction: boundedReportText,
             result: boundedReportText,
+            evidenceRefs: reviewExecutionReferencesSchema.optional(),
           }),
       )
       .max(100),
@@ -92,6 +97,20 @@ export const laneCompletedReportSchema = z
 
 export type LaneCompletedReport = z.infer<typeof laneCompletedReportSchema>;
 
+/** Application aggregation preserves every completed unit without inheriting a
+ * single model response's transport bounds. The finding contract is unchanged. */
+export const aggregateLaneCompletedReportSchema = z.strictObject({
+  ...laneCompletedReportSchema.shape,
+  scope: z.strictObject({ claim: z.string().min(1), dirtyState: z.string().min(1), inspectedSupportingContext: z.array(boundedReportText) }),
+  coverage: z.strictObject({ staticOnly: z.array(boundedReportText), unreached: z.array(boundedReportText) }),
+  churn: z.strictObject({ window: z.string().min(1), symbolCoverage: z.array(boundedReportText), fileFallbacks: z.array(boundedReportText) }),
+  probes: z.array(laneCompletedReportSchema.shape.probes.element),
+  candidates: z.array(laneReportCandidateSchema),
+  verifiedClaims: z.array(boundedReportText), limitations: z.array(boundedReportText),
+  specialistChecks: z.array(specialistCheckSchema).nullable().optional(),
+  requirementChecks: z.array(requirementCheckSchema).nullable().optional(),
+});
+
 const laneCompletedReportDraftSchema = laneCompletedReportSchema.safeExtend({
   candidates: z.array(laneReportCandidateSchema.extend({ impactSummary: findingImpactSummarySchema })).max(100),
   specialistChecks: z.array(specialistCheckSchema).max(2_000).nullable(),
@@ -106,7 +125,7 @@ export const laneCheckpointContentSchema = z
     observations: z.array(observationSchema).max(40),
     nextSteps: z.array(z.string().min(1).max(500)).max(20),
     limitations: z.array(z.string().min(1).max(500)).max(20),
-    completedReport: laneCompletedReportSchema.nullable(),
+    completedReport: aggregateLaneCompletedReportSchema.nullable(),
   })
   .superRefine((checkpoint, ctx) => {
     if (checkpoint.status === "complete" && !checkpoint.completedReport) {
@@ -354,7 +373,7 @@ export async function writeLaneCheckpoint(
     ...parsedContent,
   });
   const serialized = `${JSON.stringify(checkpoint)}\n`;
-  if (Buffer.byteLength(serialized, "utf8") > maxCheckpointBytes) {
+  if (checkpoint.status !== "complete" && Buffer.byteLength(serialized, "utf8") > maxCheckpointBytes) {
     throw new Error("Lane checkpoint exceeds the 64 KiB limit");
   }
   await sandbox.writeTextFile({

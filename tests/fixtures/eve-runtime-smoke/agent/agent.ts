@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { capabilityProbeResponse } from "./lib/capability-fixture";
 import { defineAgent, defineDynamic } from "eve";
 import { currentReviewRoute } from "../../../../agent/lib/review-route";
 import {
@@ -20,6 +21,8 @@ function hasToolResult(request: MockModelRequest, name: string): boolean {
 }
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const capabilities = capabilityProbeResponse(request);
+  if (capabilities !== null) return capabilities;
   const prompt = request.userMessages.join("\n");
   const system = request.messages.filter((message) => message.role === "system").map((message) => message.text).join("\n");
   if (!system.includes("Slop Sheriff")) throw new Error("Production role instructions were not resolved by Eve");
@@ -45,12 +48,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return { toolCalls: [{ name: "fixture_workflow", input: { message: `${routingEnvelope({ role: "lane", axis: "test-health", attempt: 0 })}\n${reviewTaskInstructions({ role: "lane", axis: "test-health", attempt: 0 })}\nKGR-EVAL-ROLE-CHILD` } }] };
   }
 
-  if (prompt.includes("KGR-EVAL-WINDOW-ROOT")) {
-    if (!hasToolResult(request, "fixture_window")) return { toolCalls: [{ name: "fixture_window", input: {} }] };
-    if (request.toolResults.filter((item) => item.name === "fixture_step").length < 15) return { toolCalls: [{ name: "fixture_step", input: { marker: "routing" } }] };
-    return { toolCalls: [{ name: "review_workflow", input: { context: "Synthetic review claim" } }] };
-  }
-
   if (prompt.includes("KGR-EVAL-GUARD-CHILD")) {
     const result = request.toolResults.find((item) => item.name === "review_workflow");
     if (!result) return { toolCalls: [{ name: "review_workflow", input: { context: "Synthetic review claim" } }] };
@@ -72,19 +69,23 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (prompt.includes("KGR-EVAL-AUTHORED-CHILD")) {
     const route = parseSubagentRoute(request.userMessages.map((content) => ({ role: "user", content })));
-    // Recorded PR43 shape: the scout stops with prose instead of final_output.
-    if (route.role === "scout" && prompt.includes("KGR-EVAL-SCOUT-PROSE") && !prompt.includes("Receipt recovery:")) return "Request: lookup. Evidence: found-symbol. Limitations: none.";
-    if (route.role === "scout") return { toolCalls: [{ name: "final_output", input: { request: "lookup", evidence: "found-symbol", limitations: [] } }] };
-    if (route.role !== "lane") throw new Error("Invalid authored child route");
+    if (route.role !== "lane" || !route.workId) throw new Error("Invalid authored work route");
     if (route.axis === "project-api" && !prompt.includes("Preserve the documented wire envelope.")) throw new Error("Project API criteria missing");
     if (route.axis === "project-accessibility" && !prompt.includes("Every interactive control has an accessible name.")) throw new Error("Project accessibility criteria missing");
-    if (route.attempt === 1 && !prompt.includes("found-symbol")) throw new Error("Fresh continuation lost scout evidence");
-    if (!hasToolResult(request, "fixture_checkpoint")) return { toolCalls: [{ name: "fixture_checkpoint", input: {} }] };
-    const checkpointResult = request.toolResults.find((item) => item.name === "fixture_checkpoint");
-    if (checkpointResult?.isError) throw new Error(`Synthetic checkpoint tool failed: ${JSON.stringify(checkpointResult.output)}`);
-    const checkpoint = z.object({ attestation: z.string(), status: z.enum(["in-progress", "complete"]) }).parse(checkpointResult?.output);
-    const incomplete = checkpoint.status === "in-progress";
-    return { toolCalls: [{ name: "final_output", input: { axis: route.axis, status: incomplete ? "incomplete" : "complete", scoutRequests: incomplete ? ["lookup"] : [], checkpoint: checkpoint.attestation } }] };
+    const checkpoints = request.toolResults.filter(item => item.name === "fixture_checkpoint");
+    const requiredTurns = request.userMessages.filter(message => message.includes(`"workId":"${route.workId}"`)).length;
+    if (checkpoints.length < requiredTurns) return { toolCalls: [{ name: "fixture_checkpoint", input: {} }] };
+    const last = checkpoints.at(-1);
+    if (last?.isError) throw new Error(`Synthetic work result failed: ${JSON.stringify(last.output)}`);
+    const receipt = z.object({ workId: z.string(), status: z.enum(["in-progress", "complete"]) }).parse(last?.output);
+    return { toolCalls: [{ name: "final_output", input: receipt }] };
+  }
+
+  if (prompt.includes("KGR-EVAL-LOST-HANDLE-ROOT")) {
+    const result = request.toolResults.find(item => item.name === "review_workflow");
+    if (!result) return { toolCalls: [{ name: "review_workflow", input: { context: "KGR-EVAL-LOST-HANDLE" } }] };
+    if (!result.isError || !JSON.stringify(result.output).includes("unauthorized fresh child")) throw new Error("Native missing handle bypassed retained-context admission");
+    return "LOST-HANDLE-REJECTED";
   }
 
   if (prompt.includes("KGR-EVAL-AUTHORED-REPEAT")) {
@@ -167,6 +168,7 @@ const model = mockModel({
 });
 
 export default defineAgent({
+  defaultTools: true,
   experimental: { instrumentationProviders: true },
   ...(productionAgent.limits ? { limits: productionAgent.limits } : {}),
   model: defineDynamic({

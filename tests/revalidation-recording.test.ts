@@ -1,7 +1,7 @@
 import { reviewPolicyDigest } from "../src/config/review-policy-identity";
 import { expect, spyOn, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
-import recordTool from "../agent/tools/record_review_revalidation";
+import { reviewTool as recordTool } from "../agent/tools/record_review_revalidation";
 import * as adapters from "../src/github/chat-adapter";
 import { reviewReportState } from "../agent/lib/review-report";
 import { reviewRecoveryState } from "../agent/lib/review-recovery";

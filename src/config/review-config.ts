@@ -22,6 +22,16 @@ export const defaultEmbedding: EmbeddingConfig = {
 };
 
 export type ModelChain = readonly [string, ...string[]];
+export const reviewTasks = ["triage", "analysis", "verification", "adjudication", "presentation"] as const;
+export type ReviewTask = (typeof reviewTasks)[number];
+export const reviewReasoningLevels = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ReviewReasoning = (typeof reviewReasoningLevels)[number];
+export interface ReviewTaskConfig {
+  readonly model?: ModelChain;
+  readonly reasoning?: ReviewReasoning;
+  readonly escalationModel?: ModelChain;
+  readonly escalationReasoning?: ReviewReasoning;
+}
 export const reviewProfiles = ["focused", "balanced", "thorough"] as const;
 export type ReviewProfile = (typeof reviewProfiles)[number];
 export const specialistRoles = ["scout"] as const;
@@ -30,6 +40,9 @@ export type ReviewAgentRole = ReviewAxis | SpecialistRole;
 
 export interface ReviewConfig {
   readonly model: ModelChain;
+  /** Records whether the repository explicitly chose its general model chain. */
+  readonly modelConfigured?: boolean;
+  readonly tasks?: Readonly<Partial<Record<ReviewTask, ReviewTaskConfig>>>;
   readonly embedding: EmbeddingConfig;
   readonly publicRoots: readonly string[];
   readonly profile: ReviewProfile;
@@ -52,6 +65,12 @@ export interface ReviewConfig {
 const rawConfigSchema = z
   .strictObject({
     model: z.string().optional(),
+    tasks: z.partialRecord(z.enum(reviewTasks), z.strictObject({
+      model: z.string().optional(),
+      reasoning: z.enum(reviewReasoningLevels).optional(),
+      escalationModel: z.string().optional(),
+      escalationReasoning: z.enum(reviewReasoningLevels).optional(),
+    })).optional(),
     embedding: z.string().optional(),
     embeddingDimension: z.number().int().optional(),
     publicRoots: z.array(z.string().min(1)).optional(),
@@ -121,6 +140,8 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   if (source === null || source === undefined || source.trim() === "") {
     return {
       model: [...defaultModels],
+      modelConfigured: false,
+      tasks: {},
       embedding: defaultEmbedding,
       publicRoots: [],
       profile: defaultProfile,
@@ -167,6 +188,13 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   const blocking = result.data.blocking ?? false;
   const personality = result.data.personality !== false && result.data.voice !== "off";
   const extensions = {
+    modelConfigured: result.data.model !== undefined,
+    tasks: Object.fromEntries(Object.entries(result.data.tasks ?? {}).map(([task, settings]) => [task, {
+      ...(settings.model ? { model: parseModelChain(settings.model, `tasks.${task}.model`) } : {}),
+      ...(settings.escalationModel ? { escalationModel: parseModelChain(settings.escalationModel, `tasks.${task}.escalationModel`) } : {}),
+      ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
+      ...(settings.escalationReasoning ? { escalationReasoning: settings.escalationReasoning } : {}),
+    }])),
     voice: personality ? result.data.voice ?? "theatrical" as const : "off" as const,
     ...(result.data.voiceGuide ? { voiceGuide: result.data.voiceGuide } : {}),
     requirementPaths: result.data.requirementPaths ?? [],

@@ -341,7 +341,7 @@ function reportVerdict(
   return active.length > 0 ? "APPROVE_WITH_IMPROVEMENTS" : "APPROVE";
 }
 
-function priorFindings(
+export function validatedPriorFindings(
   state: ReportAssemblyState,
   priorReport: ReviewReport | null,
   priorRuntimeFindingIds: readonly string[],
@@ -409,7 +409,7 @@ export function assembleCanonicalReviewReport(input: {
     }
   }
 
-  const prior = priorFindings(state, input.priorReport, input.priorRuntimeFindingIds ?? []);
+  const prior = validatedPriorFindings(state, input.priorReport, input.priorRuntimeFindingIds ?? []);
   const knownIdentities = new Set(prior.filter((finding) => finding.status !== "fixed").map(findingIdentity));
   const fresh = coalesceFreshFindings(
     draft.data.freshFindings,

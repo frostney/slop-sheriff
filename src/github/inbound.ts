@@ -16,6 +16,8 @@ import {
 } from "./review-state";
 
 export const pullRequestDetailsSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().nullable().optional(),
   number: z.number().int().positive(),
   draft: z.boolean(),
   state: z.string(),
@@ -123,12 +125,10 @@ export function planDispatch(input: {
               patchFingerprint:
                 input.state.state.baseline.patchFingerprint,
             }
-          : input.state.state.initialFullStatus === "failed"
-            ? { kind: "lost" }
-            : {
+          : {
                 kind: "none",
                 initial:
-                  input.state.state.initialFullStatus === "running"
+                  input.state.state.initialFullStatus === "running" || input.state.state.initialFullStatus === "failed"
                     ? "running"
                     : input.state.state.initialFullStatus === "debouncing"
                       ? "debouncing"
@@ -138,7 +138,7 @@ export function planDispatch(input: {
   const patchFingerprint = input.patchFiles
     ? effectivePatchFingerprint(input.patchFiles)
     : undefined;
-  let plan = planReview({
+  const plan = planReview({
     action: input.action,
     baseline,
     draft: input.draft,
@@ -153,10 +153,6 @@ export function planDispatch(input: {
   });
   const priorBaseline =
     input.state.kind === "valid" ? input.state.state.baseline : null;
-  if (input.reviewPolicyDigest && priorBaseline && priorBaseline.reviewPolicyDigest !== input.reviewPolicyDigest &&
-      (plan.kind === "reuse" || plan.kind === "delta")) {
-    plan = { kind: "full", delaySeconds: 0, reason: "initial", supersedesActiveReview: true };
-  }
   const changedFiles =
     priorBaseline && input.patchFiles
       ? changedEffectiveFiles(

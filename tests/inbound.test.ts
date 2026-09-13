@@ -122,7 +122,7 @@ describe("GitHub inbound planning", () => {
         patchFiles: rebased,
         state: { kind: "valid", state: completedState() },
       }).plan,
-    ).toEqual({ kind: "reuse", reason: "semantic-no-op" });
+    ).toEqual({ kind: "delta", revalidatePriorFindings: true });
   });
 
   test("selects only files whose effective patch changed", () => {
@@ -183,19 +183,27 @@ describe("GitHub inbound planning", () => {
 });
 
 
-test("changed trusted configuration or base invalidates semantic reuse, including legacy baselines", () => {
+test("every baseline update validates persistent work, including policy changes and legacy baselines", () => {
   const digest = reviewPolicyDigest("", "base-one");
   const old = completedState();
   if (!old.baseline) throw new Error("Expected baseline");
   const state = { ...old, baseline: { ...old.baseline, reviewPolicyDigest: digest } };
   const dispatch = (policy: string, saved = state) => planDispatch({ action: "synchronize", draft: false, head: "same-patch-head", patchFiles: oldFiles, state: { kind: "valid", state: saved }, reviewPolicyDigest: policy });
-  expect(dispatch(digest).plan.kind).toBe("reuse");
+  expect(dispatch(digest).plan.kind).toBe("delta");
   for (const changed of [
     reviewPolicyDigest("voice: off", "base-one"),
     reviewPolicyDigest("model: openai/gpt-5.6-luna", "base-one"),
     reviewPolicyDigest("", "base-two"),
     reviewPolicyDigest('lanes: [{id: project-api, name: API, criteria: Preserve wire format, always: true}]', "base-one"),
-  ]) expect(dispatch(changed).plan).toMatchObject({ kind: "full", delaySeconds: 0 });
-  expect(planDispatch({ action: "synchronize", draft: false, head: "same-head", patchFiles: oldFiles, state: { kind: "valid", state: old }, reviewPolicyDigest: digest }).plan.kind).toBe("full");
+  ]) expect(dispatch(changed).plan).toMatchObject({ kind: "delta", revalidatePriorFindings: true });
+  expect(planDispatch({ action: "synchronize", draft: false, head: "same-head", patchFiles: oldFiles, state: { kind: "valid", state: old }, reviewPolicyDigest: digest }).plan.kind).toBe("delta");
   expect(planDispatch({ action: "closed", draft: false, head: "same-head", patchFiles: oldFiles, state: { kind: "valid", state: old }, reviewPolicyDigest: digest }).plan.kind).toBe("cleanup");
+});
+
+test("a known failed initial review admits a newer head without treating retained work as corrupt state", () => {
+  const known = { ...completedState(), initialFullStatus: "failed" as const, baseline: null };
+  const result = planDispatch({ action: "synchronize", draft: false, head: "new-head", patchFiles: oldFiles, state: { kind: "valid", state: known } });
+  expect(result.plan).toMatchObject({ kind: "full", delaySeconds: 0, supersedesActiveReview: true });
+  const corrupted = planDispatch({ action: "synchronize", draft: false, head: "new-head", patchFiles: oldFiles, state: { kind: "lost" } });
+  expect(corrupted.plan).toEqual({ kind: "fail-closed", reason: "lost-baseline" });
 });

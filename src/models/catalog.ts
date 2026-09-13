@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { chainForRoute } from "./routing";
 import {
   modelsForSpecialist,
   specialistRoles,
   type ReviewConfig,
+  reviewTasks,
 } from "../config/review-config";
 
 const catalogModelSchema = z.object({
@@ -48,6 +50,15 @@ export async function validateConfiguredModels(
 ): Promise<void> {
   const catalog = await gatewayModels();
   const languageModels = new Set(config.model);
+  for (const task of reviewTasks) {
+    for (const difficulty of ["routine", "ambiguous", "conflicting"] as const) {
+      chainForRoute(config, { role: "coordinator", task, attempt: 0, difficulty }).forEach(model => languageModels.add(model));
+    }
+  }
+  for (const settings of Object.values(config.tasks ?? {})) {
+    settings?.model?.forEach(model => languageModels.add(model));
+    settings?.escalationModel?.forEach(model => languageModels.add(model));
+  }
   specialistRoles.forEach((role) =>
     modelsForSpecialist(config, role).forEach((model) => languageModels.add(model)),
   );

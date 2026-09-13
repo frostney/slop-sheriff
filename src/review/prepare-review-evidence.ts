@@ -1,4 +1,6 @@
 import { prepareRequirementInventory, readRequirementSource } from "./requirements";
+import { prepareReviewWork } from "./prepare-review-work";
+import type { ReviewAxisDecision } from "./axis-selection";
 import { createHash, randomUUID } from "node:crypto";
 import type { RuntimeSandboxSession } from "eve/sandbox";
 import { Tiktoken } from "js-tiktoken/lite";
@@ -222,6 +224,7 @@ async function prepareReviewEvidenceOnce(
     readonly config: Pick<ReviewConfig, "embedding"> & Partial<Pick<ReviewConfig, "publicRoots" | "requirementPaths" | "lanes">>;
     readonly planKind: "full" | "delta";
     readonly workspaceDependencies?: ReviewWorkspaceDependencies;
+    readonly work?: { readonly decisions: readonly ReviewAxisDecision[]; readonly claim: string };
   },
 ): Promise<ReviewEvidenceLedger> {
   if (!trusted.patchFingerprint) {
@@ -266,6 +269,11 @@ async function prepareReviewEvidenceOnce(
         commonWorkIds: existing.commonWork.records.map((record) => record.id),
       }),
     );
+    if (input.work) await prepareReviewWork(sandbox, trusted, {
+      ...input.work, manifest: await readReviewEvidenceManifest(sandbox, identity),
+      requirements: existing.requirements ?? [], config: { lanes: input.config.lanes ?? [] },
+      setup: (await readCapabilityPreflight(sandbox, identity)).setup,
+    });
     return existing;
   }
 
@@ -469,5 +477,8 @@ async function prepareReviewEvidenceOnce(
       gaps: ledger.gaps.map((gap) => gap.id),
     }),
   );
+  if (input.work) await prepareReviewWork(sandbox, trusted, {
+    ...input.work, manifest, requirements, config: { lanes: input.config.lanes ?? [] }, setup: capabilities.preflight.setup,
+  });
   return ledger;
 }

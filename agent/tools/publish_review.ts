@@ -1,3 +1,4 @@
+import { outsideReviewWork } from "../lib/review-capabilities";
 import { currentReviewReportState } from "../lib/review-report";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
@@ -9,7 +10,11 @@ import { publishPendingReview } from "../lib/publish-review";
 
 export const publishReviewInputSchema = z.strictObject({});
 
-export default defineTool({
+export const publishReviewOutputSchema = z.strictObject({ checkUrl: z.string(), findingCount: z.number().int().nonnegative(),
+  memory: z.union([z.enum(["queued", "unavailable"]), z.strictObject({ status: z.literal("pending-publication") })]),
+});
+
+export const reviewTool = defineTool({
   description:
     "Publish the application-assembled report already staged for this trusted review identity. The tool accepts no model-authored report or publication target.",
   inputSchema: publishReviewInputSchema,
@@ -36,3 +41,5 @@ export default defineTool({
     });
   },
 });
+
+export default outsideReviewWork(reviewTool);

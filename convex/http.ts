@@ -1,4 +1,6 @@
 import { registerArtifactRoutes } from "./artifactHttp";
+import { registerProbeRoutes } from "./probeHttp";
+import { registerReviewWorkRoutes } from "./reviewWorkHttp";
 import { registerCostLedgerRoutes } from "./costLedgerHttp";
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
@@ -181,5 +183,7 @@ for (const [operation, definition] of Object.entries(lifecycleOperations)) {
 
 registerCostLedgerRoutes(http, isAuthorized);
 registerArtifactRoutes(http, isAuthorized);
+registerProbeRoutes(http, isAuthorized);
+registerReviewWorkRoutes(http, isAuthorized);
 
 export default http;

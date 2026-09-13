@@ -42,8 +42,7 @@ export type ReviewPlan =
       readonly reason: "initial" | "manual";
       readonly supersedesActiveReview: boolean;
     }
-  | { readonly kind: "delta"; readonly revalidatePriorFindings: true }
-  | { readonly kind: "reuse"; readonly reason: "semantic-no-op" };
+  | { readonly kind: "delta"; readonly revalidatePriorFindings: true };
 
 export function planReview(event: ReviewEvent): ReviewPlan {
   if (event.action === "closed") {
@@ -78,8 +77,7 @@ export function planReview(event: ReviewEvent): ReviewPlan {
   if (event.patchFingerprint === undefined) {
     return { kind: "fail-closed", reason: "lost-baseline" };
   }
-  if (event.patchFingerprint === event.baseline.patchFingerprint) {
-    return { kind: "reuse", reason: "semantic-no-op" };
-  }
+  // An unchanged diff is not proof that supporting base code or requirements
+  // stayed valid. The persistent work planner verifies semantic dependencies.
   return { kind: "delta", revalidatePriorFindings: true };
 }

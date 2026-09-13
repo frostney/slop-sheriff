@@ -6,7 +6,7 @@ import { extractRequirementObligations, prepareRequirementInventory, readRequire
 import { parseReviewConfig } from "../src/config/review-config";
 import { validateLaneCheckpointCoverage } from "../src/review/lane-checkpoint";
 import { checkpointContent } from "./fixtures/eve-runtime-smoke/agent/lib/orchestration";
-import readReviewEvidenceTool from "../agent/tools/read_review_evidence";
+import { reviewTool as readReviewEvidenceTool } from "../agent/tools/read_review_evidence";
 
 const fingerprint = "e".repeat(64);
 

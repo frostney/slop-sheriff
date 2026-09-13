@@ -1,3 +1,4 @@
+import { outsideReviewWork } from "../lib/review-capabilities";
 import { requirementObligationIdentities, requirementsForAxis } from "../../src/review/requirements";
 import { readReviewEvidenceLedger } from "../../src/review/evidence-ledger";
 import { currentReviewEvidenceIdentity } from "../lib/review-evidence";
@@ -77,7 +78,7 @@ export const reviewLaneCheckpointInputSchema = z
     }
   });
 
-export default defineTool({
+export const reviewTool = defineTool({
   description:
     "Read or replace the compact schema-v3 checkpoint for one exact review axis. The application binds each checkpoint to the immutable evidence-ledger digest. A fresh lane continuation reads this first and reconciles it with the exact manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Complete checkpoints preserve a strict typed terminal report; in-progress checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without raw tool history.",
   inputSchema: reviewLaneCheckpointInputSchema,
@@ -160,3 +161,5 @@ export default defineTool({
     );
   },
 });
+
+export default outsideReviewWork(reviewTool);
