@@ -68,12 +68,10 @@ or a different review scope. Additional executable integrations need a normal
 application release.
 
 The app admits at most 24 project lanes (31 including built-ins), rejecting larger
-registries before dispatch. Every admitted active lane receives its own reservation
-of 16 child invocations, counting its scouts, scout output recovery and checkpoint
-continuations. One lane cannot consume another lane's allocation. Exhaustion is an
-explicit incomplete execution requiring repair/recovery, never a dropped Check or
-permission to publish a complete review. These are bounded protocol safeguards,
-not finding-quality or cost acceptance criteria.
+registries before dispatch. Each active lane continues independently until its
+coverage and investigation are complete. Signed checkpoints must show progress;
+repeated or cycling work stops with an explicit incomplete status. There is no
+fixed child-invocation allocation or model-step cadence for continuations.
 
 All lanes use the same generated tool schemas, evidence packets, coverage checks,
 signed checkpoints, finding contract, deduplication, inline delivery and reporting.

@@ -34,4 +34,3 @@ export function laneCheckName(axis: ReviewAxis, config?: Pick<ReviewConfig, "lan
 export function assertConfiguredLane(axis: ReviewAxis, config: Pick<ReviewConfig, "lanes">): void {
   if (!reviewLaneRegistry(config).some((lane) => lane.id === axis)) throw new Error(`Unconfigured review lane ${axis}`);
 }
-

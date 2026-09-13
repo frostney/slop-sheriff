@@ -6,6 +6,7 @@ import { extractRequirementObligations, prepareRequirementInventory, readRequire
 import { parseReviewConfig } from "../src/config/review-config";
 import { validateLaneCheckpointCoverage } from "../src/review/lane-checkpoint";
 import { checkpointContent } from "./fixtures/eve-runtime-smoke/agent/lib/orchestration";
+import readReviewEvidenceTool from "../agent/tools/read_review_evidence";
 
 const fingerprint = "e".repeat(64);
 
@@ -31,7 +32,8 @@ test("discovers unchanged obligations and linked sources once at both exact revi
   };
   try {
     await git("init --quiet"); await git("config user.name Fixture"); await git("config user.email fixture@example.test");
-    await write("AGENTS.md", "Completion requires [DoD](docs/DefinitionOfDone.md).\n");
+    await write("AGENTS.md", "Completion requires [DoD](docs/DefinitionOfDone.md).\n[Explicit CLI policy](.agents/skills/cli-contract/SKILL.md)\n");
+    await write(".agents/skills/cli-contract/SKILL.md", "CLI must retain the public output contract.\n");
     await write("docs/DefinitionOfDone.md", "- [ ] The CLI must reject invalid input.\n[contract](../contracts/cli.md)\n");
     await write("contracts/cli.md", "Nonzero exit and diagnostic. [cycle](../AGENTS.md)\n");
     await write("odd-layout/obligations/cli.txt", "Frozen output contract. [external requirement](https://example.test/cli-contract)\n");
@@ -40,6 +42,8 @@ test("discovers unchanged obligations and linked sources once at both exact revi
     await write("docs/adr/other-domain/001-choice.md", "Other domain must use a separate store.\n");
     await write("specs/cli/contracts.md", "CLI must reject missing files.\n");
     await write("src/cli.ts", "export const valid = true;\n");
+    await write(".agents/skills/cli-release/SKILL.md", "The release operator must publish a tag.\n");
+    await write("vendor/cli/README.md", "Consumers must install vendor extensions.\n");
     const trustedConfig = "requirementPaths: [odd-layout/obligations]\nlanes:\n  - id: project-cli\n    name: CLI contract\n    criteria: |\n      The CLI must reject invalid inputs.\n      - [ ] Help includes usage examples.\n    referencePaths: [contracts/cli.md]\n    always: true\n  - id: project-style\n    name: Style\n    criteria: |\n      Consistent user-facing terminology.\n      Help must name the active command.\n    always: true\n  - id: project-unrelated\n    name: Unrelated\n    criteria: Do not activate outside other component.\n    referencePaths: [missing-inactive-policy.md]\n    applicability: { paths: [other-component] }\n";
     await write(".github/slop-sheriff.yml", trustedConfig);
     await git("add ."); await git("commit --quiet -m base"); const baseSha = await git("rev-parse HEAD");
@@ -53,6 +57,9 @@ test("discovers unchanged obligations and linked sources once at both exact revi
     expect(inventory.some((source) => source.path === "specs/other-domain/plan.md")).toBe(false);
     expect(inventory.some((source) => source.path === "docs/adr/other-domain/001-choice.md")).toBe(false);
     expect(inventory.some((source) => source.path === "specs/cli/contracts.md")).toBe(true);
+    expect(inventory.some((source) => source.path === ".agents/skills/cli-release/SKILL.md")).toBe(false);
+    expect(inventory.some((source) => source.path === "vendor/cli/README.md")).toBe(false);
+    expect(inventory.some((source) => source.path === ".agents/skills/cli-contract/SKILL.md")).toBe(true);
     expect(new Set(blobReads).size).toBe(blobReads.length);
     const custom = requirementsForAxis(inventory, "project-cli");
     expect(custom.map((source) => source.path)).toEqual(expect.arrayContaining(["contracts/cli.md", ".github/slop-sheriff.yml#lanes.project-cli.criteria"]));
@@ -71,6 +78,23 @@ test("discovers unchanged obligations and linked sources once at both exact revi
     expect(result.content).toContain("The CLI must reject invalid input");
     expect(result.content).toContain("No rejection required");
     expect(result.content).toContain(baseSha); expect(result.content).toContain(headSha);
+    const unchanged = inventory.find((entry) => entry.path === "AGENTS.md")!;
+    const unchangedResult = await readRequirementSource(sandbox, fingerprint, inventory, unchanged.id);
+    expect(unchangedResult.content.match(/Completion requires/g)).toHaveLength(1);
+    expect(unchangedResult.content).toContain(baseSha);
+    expect(unchangedResult.content).toContain(headSha);
+    expect(unchangedResult.content).toContain("identical");
+    const project = readReviewEvidenceTool.toModelOutput!;
+    const modelOutput = await project({ operation: "requirement", ledgerDigest: "a".repeat(64), ...result });
+    expect(modelOutput).toMatchObject({ type: "json", value: {
+      source: { id: source.id, path: source.path, obligations: source.obligations.map((obligation) => ({ id: obligation.id, baseLine: obligation.base?.line ?? null, headLine: obligation.head?.line ?? null })) },
+      content: result.content, cursor: result.cursor, nextCursor: result.nextCursor,
+    } });
+    // Integrity hashes and repeated clause bodies remain in the durable result,
+    // while the model reads the exact clause text from the source only once.
+    expect(JSON.stringify(modelOutput)).not.toContain("contentDigest");
+    const explicitSupport = await prepareRequirementInventory(sandbox, { baseSha, headSha, patchFingerprint: fingerprint, paths: ["src/cli.ts", ".agents/skills/cli-release/SKILL.md"], config: { requirementPaths: ["vendor/cli/README.md"], lanes: [] } });
+    expect(explicitSupport.map((entry) => entry.path)).toEqual(expect.arrayContaining([".agents/skills/cli-release/SKILL.md", "vendor/cli/README.md"]));
     expect(inventory.find((entry) => entry.path === "contracts/cli.md")).toMatchObject({ headBlob: null });
     const storedPath = [...stored.keys()].find((path) => path.includes(source.id))!;
     stored.set(storedPath, "forged obligations");

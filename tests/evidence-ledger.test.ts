@@ -290,6 +290,16 @@ describe("exact-head evidence replay", () => {
       repositoryDatabaseId,
       workflowRuns: [],
     });
+    const requirementText = "Must reject malformed input.";
+    const requirement = {
+      id: `req-${"a".repeat(24)}`, kind: "document" as const,
+      path: "docs/DoD.md", reason: "governance" as const,
+      referencedBy: ["AGENTS.md"], references: [], laneIds: [],
+      baseBlob: "a".repeat(40), headBlob: "a".repeat(40),
+      contentDigest: createHash("sha256").update(requirementText).digest("hex"), characters: requirementText.length,
+      obligations: [{ id: `ob-${"b".repeat(24)}`, base: { line: 1, text: "Must reject malformed input." }, head: { line: 1, text: "Must reject malformed input." } }],
+    };
+    await runtime.writeTextFile({ path: `/tmp/known-good-review/evidence/${identity.patchFingerprint}/requirements/${requirement.id}.txt`, content: requirementText });
     const ledger = assembleReviewEvidenceLedger({
       capabilities: capabilities.preflight,
       commonWork: commonWorkFixture(identity),
@@ -297,6 +307,7 @@ describe("exact-head evidence replay", () => {
       identity,
       manifest,
       probes: [],
+      requirements: [requirement],
     });
     await writeReviewEvidenceLedger(runtime, ledger);
     commands.length = 0;
@@ -375,6 +386,16 @@ describe("exact-head evidence replay", () => {
       operation: "packet", axis: "engineering-quality", path: null, cursor: null,
     }, ctx);
     expect(packet).toMatchObject({ operation: "packet", ledgerDigest: ledger.digest });
+    if (!("operation" in packet)) throw new Error("Expected a terminal evidence result");
+    expect(packet).toMatchObject({ requirements: [requirement] });
+    const projected = await readReviewEvidenceTool.toModelOutput!(packet);
+    expect(projected).toMatchObject({ type: "json", value: {
+      operation: "packet", ledgerDigest: ledger.digest,
+      requirements: [{ id: requirement.id, path: requirement.path,
+        obligations: [{ id: requirement.obligations[0]!.id, baseLine: 1, headLine: 1 }] }],
+      entries: [], totalEntries: 0, nextCursor: null,
+    } });
+    expect(JSON.stringify(projected)).not.toContain("Must reject malformed input.");
     expect(reads.filter((path) => path.endsWith("/ledger.json"))).toHaveLength(1);
     expect(reads.filter((path) => path.endsWith("/capabilities.json"))).toHaveLength(1);
 

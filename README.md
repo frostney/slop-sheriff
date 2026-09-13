@@ -113,7 +113,7 @@ agents:
   scout: openai/gpt-5.6-luna
 ```
 
-Choose `voice: theatrical` (C, default), `voice: understated` (B), or
+Choose `voice: theatrical` (default), `voice: understated`, or
 `voice: off`. `personality: false` also selects plain language. A trusted-base
 `voiceGuide: docs/review-voice.md` can customize style without changing evidence,
 severity, or the recommendation. Each finding has a 25 to 45 word introduction,

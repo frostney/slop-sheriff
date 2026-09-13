@@ -1,4 +1,4 @@
-import { readRequirementSource } from "../../src/review/requirements";
+import { readRequirementSource, requirementSourceIndex } from "../../src/review/requirements";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { requireReviewLane } from "../lib/review-route";
 import { defineTool, toolOutput } from "eve/tools";
@@ -145,6 +145,12 @@ export default defineTool({
     };
   },
   toModelOutput(output) {
+    if (output.operation === "packet" || output.operation === "manifest") {
+      return toolOutput.json({ ...output, requirements: output.requirements.map(requirementSourceIndex) });
+    }
+    if (output.operation === "requirement") {
+      return toolOutput.json({ ...output, source: requirementSourceIndex(output.source) });
+    }
     return toolOutput.json(output);
   },
 });
