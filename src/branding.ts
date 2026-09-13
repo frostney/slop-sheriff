@@ -4,10 +4,10 @@ export const siteOrigin = "https://slop-sheriff.dev";
 
 /** Reusable artwork, selected without another model call or an authored URL. */
 export const findingReactions = {
-  BLOCKING: { filename: "slop-sheriff-alarmed-v1.png", alt: "Slop Sheriff looks alarmed" },
-  IMPORTANT: { filename: "slop-sheriff-concerned-v1.png", alt: "Slop Sheriff looks skeptical" },
-  IMPROVEMENT: { filename: "slop-sheriff-idea-v1.png", alt: "Slop Sheriff has an idea" },
-  NITPICK: { filename: "slop-sheriff-nitpick-v1.png", alt: "Slop Sheriff gives a cheeky wink" },
+  BLOCKING: { filename: "slop-sheriff-alarmed-v2.png", alt: "Slop Sheriff looks alarmed" },
+  IMPORTANT: { filename: "slop-sheriff-concerned-v2.png", alt: "Slop Sheriff looks skeptical" },
+  IMPROVEMENT: { filename: "slop-sheriff-idea-v2.png", alt: "Slop Sheriff has an idea" },
+  NITPICK: { filename: "slop-sheriff-nitpick-v2.png", alt: "Slop Sheriff gives a cheeky wink" },
 } as const satisfies Record<ReviewFinding["severity"], { filename: string; alt: string }>;
 
 export function findingReactionHtml(severity: ReviewFinding["severity"], absolute: boolean): string {
