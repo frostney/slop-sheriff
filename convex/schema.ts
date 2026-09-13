@@ -11,7 +11,14 @@ import {
   vReembedJob,
 } from "./validators";
 
+import { artifactTables } from "./artifactTables";
+import { costLedgerTables } from "./costLedger";
+import { reviewLifecycleTables } from "./reviewLifecycleTables";
+
 export default defineSchema({
+  ...reviewLifecycleTables,
+  ...costLedgerTables,
+  ...artifactTables,
   memoryAccess: defineTable({
     installationId: v.number(),
     repositoryId: v.string(),

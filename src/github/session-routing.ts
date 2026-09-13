@@ -1,4 +1,5 @@
-import type { ChannelFrom } from "eve/channels";
+import { activateReview } from "../lifecycle/client";
+import type { ChannelFrom, ChannelResolveSession } from "eve/channels";
 import type { SessionAuthContext } from "eve/context";
 import { reviewContextAttributes, trustedGitHubContext } from "./trusted-context";
 
@@ -23,6 +24,7 @@ export function startsFreshReviewSession(
 
 export function withFreshReviewSessions<TState>(
   from: ChannelFrom<TState>,
+  resolveSession?: ChannelResolveSession,
 ): ChannelFrom<TState> {
   return (address) => {
     const current = from(address);
@@ -35,9 +37,11 @@ export function withFreshReviewSessions<TState>(
       send: async (message, options) => {
         const freshReview = startsFreshReviewSession(options.auth);
         if (freshReview) {
+          const previous = await resolveSession?.(address);
+          await activateReview(trustedGitHubContext(options.auth), undefined, address, options.auth, previous?.id);
           await current.reset({ reason: "new review dispatch" });
         }
-        return from(address).send(
+        const session = await from(address).send(
           message,
           freshReview ? {
             ...options, mode: "task",
@@ -46,6 +50,8 @@ export function withFreshReviewSessions<TState>(
             state: { ...("state" in options ? options.state : {}), slopSheriffReviewContext: trustedGitHubContext(options.auth) },
           } : options,
         );
+        if (freshReview) await activateReview(trustedGitHubContext(options.auth), session.id);
+        return session;
       },
     };
   };

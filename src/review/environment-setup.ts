@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import type { SandboxSession } from "eve/sandbox";
+import { lockedDependencyDeclarations, acquireLockedEcosystemDependencies, materializeLockedEcosystemDependencies } from "./locked-dependency-acquisition";
+import { acquireEnvironment, dependencyAcquisitionCommand, projectAcquisitionManifest, acquisitionDeclarationPath, acquisitionRustChannel } from "./environment-acquisition";
+import { requireSandboxCommand, type AcquisitionFactory } from "./sandbox-acquisition";
 import { buildAgentBrowserCommand, installAgentBrowser } from "@agent-browser/eve/sandbox";
 import { rcompare, satisfies } from "semver";
 import { z } from "zod";
@@ -6,15 +10,16 @@ import { parse as parseYaml } from "yaml";
 import type { ReviewEvidenceIdentity } from "./evidence-bundle";
 import { discoverabilityApplies } from "./discoverability";
 
-interface SetupSandbox {
+interface SetupSandbox extends Pick<SandboxSession, "writeBinaryFile" | "readBinaryFile" | "setNetworkPolicy"> {
   run(options: { readonly command: string }): PromiseLike<{
     readonly exitCode: number; readonly stdout: unknown; readonly stderr: unknown;
   }>;
   readTextFile(options: { readonly path: string }): PromiseLike<string | null>;
 }
 
-const setupRevision = "review-environment-v1";
-const declarations = [
+const setupRevision = "review-environment-v2-isolated-acquisition";
+export const environmentDeclarations = [
+  ...lockedDependencyDeclarations,
   "package.json", "bun.lock", "bun.lockb", "package-lock.json", "npm-shrinkwrap.json",
   "pnpm-lock.yaml", "yarn.lock", ".node-version", ".nvmrc", ".bun-version",
   "Cargo.toml", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml", "go.mod", "go.sum",
@@ -91,6 +96,9 @@ export async function bootstrapReviewEnvironment(sandbox: Pick<SetupSandbox, "ru
 }
 
 export interface EnvironmentStep { readonly name: string; readonly command: string }
+function isTrustedRuntimeStep(step: EnvironmentStep): boolean {
+  return step.name.startsWith("install-") || step.name.endsWith("-runtime") && !["browser-runtime", "reviewer-browser-runtime"].includes(step.name);
+}
 export interface EnvironmentPlan {
   readonly steps: readonly EnvironmentStep[];
   readonly tools: ReadonlyMap<string, string>;
@@ -109,7 +117,7 @@ export function selectNodeVersion(requirement: string, versions: readonly string
   return selected;
 }
 
-async function resolveNodeRuntime(sandbox: SetupSandbox, files: ReadonlyMap<string, string>, browserRequired: boolean): Promise<string | undefined> {
+async function resolveNodeRuntime(sandbox: Pick<SetupSandbox, "run">, files: ReadonlyMap<string, string>, browserRequired: boolean): Promise<string | undefined> {
   const source = files.get("package.json") ?? (browserRequired ? "{}" : undefined);
   if (!source) return undefined;
   const pkg = packageManifestSchema.parse(JSON.parse(source));
@@ -283,7 +291,7 @@ export function planReviewEnvironment(files: ReadonlyMap<string, string>, paths:
   return { steps, tools };
 }
 
-export async function prepareReviewerBrowser(sandbox: Pick<SetupSandbox, "run">): Promise<NonNullable<EnvironmentSetup["browser"]>> {
+export async function prepareReviewerBrowser(sandbox: Pick<SetupSandbox, "run">, install = true): Promise<NonNullable<EnvironmentSetup["browser"]>> {
   const nativeSandbox = {
     id: "review-setup",
     async run({ command }: { readonly command: string }) {
@@ -291,7 +299,7 @@ export async function prepareReviewerBrowser(sandbox: Pick<SetupSandbox, "run">)
       return { exitCode: result.exitCode, stdout: String(result.stdout), stderr: String(result.stderr) };
     },
   };
-  await installAgentBrowser(nativeSandbox);
+  if (install) await installAgentBrowser(nativeSandbox);
   const location = await sandbox.run({ command: 'printf "%s/.local/bin/agent-browser" "$HOME"' });
   const command = String(location.stdout).trim();
   if (location.exitCode !== 0 || !command.startsWith("/")) throw new Error("Review browser installer did not provide an absolute executable path");
@@ -307,12 +315,25 @@ export async function prepareReviewerBrowser(sandbox: Pick<SetupSandbox, "run">)
   return { provider: "agent-browser", command, version: version.stdout.trim() };
 }
 
-export async function prepareReviewEnvironment(sandbox: SetupSandbox, identity: ReviewEvidenceIdentity, review: { readonly paths: readonly string[]; readonly publicRoots: readonly string[] } = { paths: [], publicRoots: [] }): Promise<EnvironmentSetup> {
+// Template inputs are application-owned, so a reusable native snapshot can
+// contain the common browser/toolchain without importing any pull-request code.
+export async function bootstrapReviewTemplate(sandbox: Pick<SetupSandbox, "run">): Promise<void> {
+  await bootstrapReviewEnvironment(sandbox);
+  const files = new Map([["package.json", JSON.stringify({ packageManager: "bun@1.4.2", engines: { node: "24.x" } })]]);
+  const plan = planReviewEnvironment(files, ["package.json"], await resolveNodeRuntime(sandbox, files, true), true);
+  for (const step of plan.steps) {
+    if (isTrustedRuntimeStep(step)) await requireSandboxCommand(sandbox, `set -eu\nexport PATH="$HOME/.local/bin:$PATH"\n${step.command}`, `Trusted template ${step.name}`);
+  }
+  await prepareReviewerBrowser(sandbox);
+}
+
+export async function prepareReviewEnvironment(sandbox: SetupSandbox, identity: ReviewEvidenceIdentity, review: { readonly paths: readonly string[]; readonly publicRoots: readonly string[] } = { paths: [], publicRoots: [] }, acquisitionFactory?: AcquisitionFactory): Promise<EnvironmentSetup> {
+  await sandbox.setNetworkPolicy("deny-all");
   const listed = await sandbox.run({ command: "cd /workspace && git ls-files -z" });
   if (listed.exitCode !== 0) throw new Error("Review environment setup could not inventory the exact checkout");
   const paths = String(listed.stdout).split("\0").filter(Boolean);
   const files = new Map<string, string>();
-  const inputPaths = [...declarations, ...paths.filter((path) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path))];
+  const inputPaths = [...new Set(environmentDeclarations), ...paths.filter((path) => path.endsWith("/package.json")), ...paths.filter((path) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path))];
   for (const path of inputPaths) {
     if (!paths.includes(path)) continue;
     // Read the committed declaration so setup cannot use a leftover dependency manifest.
@@ -320,17 +341,81 @@ export async function prepareReviewEnvironment(sandbox: SetupSandbox, identity: 
     if (result.exitCode !== 0) throw new Error(`Review environment setup could not read ${path}`);
     files.set(path, String(result.stdout));
   }
+  let binaryBunLock: Uint8Array | undefined;
+  if (files.has("bun.lockb") && !files.has("bun.lock")) {
+    await requireSandboxCommand(sandbox, `cd /workspace && git show ${quote(`${identity.headSha}:bun.lockb`)} > /tmp/review-bun.lockb`, "Committed binary lock acquisition");
+    const content = await sandbox.readBinaryFile({ path: "/tmp/review-bun.lockb" });
+    if (!content || createHash("sha256").update(content).digest("hex") !== files.get("bun.lockb")!.trim().split(/\s+/)[0]) throw new Error("Committed binary Bun lock integrity check failed");
+    binaryBunLock = content;
+  }
   const browserRequired = discoverabilityApplies(review.paths, review.publicRoots) || review.paths.some((path) => /\.(?:[jt]sx|vue|svelte|html?)$/i.test(path));
-  const plan = planReviewEnvironment(files, paths, await resolveNodeRuntime(sandbox, files, browserRequired), browserRequired);
+  const cachedBrowser = browserRequired ? await sandbox.run({ command: '"$HOME/.local/bin/agent-browser" --version' }) : undefined;
+  const hasTemplateBrowser = cachedBrowser?.exitCode === 0 && String(cachedBrowser.stdout).trim() === "agent-browser 0.37.1";
+  let extraRoots: readonly string[] = [];
+  const preliminary = planReviewEnvironment(files, paths, "24.0.0", browserRequired);
+  const plan = preliminary.steps.length === 0 ? preliminary : await acquireEnvironment(sandbox, async (acquisition) => {
+    await bootstrapReviewEnvironment(acquisition);
+    const plan = planReviewEnvironment(files, paths, await resolveNodeRuntime(acquisition, files, browserRequired), browserRequired);
+    // Trusted tool installations happen before any dependency manifests arrive.
+    for (const step of plan.steps) {
+      if (isTrustedRuntimeStep(step)) {
+        await requireSandboxCommand(acquisition, `set -eu\nexport PATH="$HOME/.local/bin:$PATH"\ncd /workspace\n${step.command}`, `Trusted ${step.name} acquisition`);
+      }
+    }
+    if (!hasTemplateBrowser && (browserRequired || plan.steps.some((step) => step.name === "browser-runtime"))) await prepareReviewerBrowser(acquisition);
+    // Lock-selected project Playwright executables are untrusted. Download the
+    // official package into a separate prefix, before materializing manifests.
+    if (plan.steps.some((step) => step.name === "browser-runtime")) {
+      const pkg = packageManifestSchema.parse(JSON.parse(files.get("package.json")!));
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      const requested = z.string().parse(deps.playwright ?? deps["@playwright/test"]);
+      if (!/^[~^]?\d+\.\d+\.\d+$/.test(requested)) throw new Error("Project browser acquisition requires a public Playwright version declaration");
+      await requireSandboxCommand(acquisition, `export PATH="$HOME/.local/bin:$PATH"\nnpm install --ignore-scripts --prefix /tmp/review-playwright ${quote(`playwright@${requested}`)} && /tmp/review-playwright/node_modules/.bin/playwright install chromium`, "Official project browser acquisition");
+    }
+    for (const step of plan.steps) {
+      if (step.name !== "repository-dependencies") continue;
+      const command = dependencyAcquisitionCommand(step.command);
+      if (binaryBunLock) await acquisition.writeBinaryFile({ path: "bun.lockb", content: binaryBunLock });
+      await acquisition.writeTextFile({ path: "package.json", content: projectAcquisitionManifest(files.get("package.json")!) });
+      for (const [path, source] of files) if (path.endsWith("/package.json")) await acquisition.writeTextFile({ path: acquisitionDeclarationPath(path), content: projectAcquisitionManifest(source) });
+      for (const lock of ["bun.lock", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"]) {
+        if (files.has(lock)) await acquisition.writeTextFile({ path: lock, content: files.get(lock)! });
+      }
+      await requireSandboxCommand(acquisition, `set -eu\nexport PATH="$HOME/.local/bin:$PATH"\ncd /workspace\n${command}`, "Script-free repository dependency acquisition");
+    }
+    for (const step of plan.steps) {
+      const safe = step.name === "rust-dependencies" ? step.command
+        : step.name === "go-dependencies" ? step.command
+        : step.name === "python-dependencies" ? step.command.includes("uv sync") ? "uv --no-config sync --frozen --no-build --no-install-project --no-editable" : "uv --no-config venv && uv --no-config pip sync --only-binary=:all: requirements.txt"
+        : undefined;
+      if (!safe) continue;
+      const inputs = step.name === "rust-dependencies" ? ["Cargo.toml", "Cargo.lock"]
+        : step.name === "go-dependencies" ? ["go.mod", "go.sum"] : ["pyproject.toml", "uv.lock", "requirements.txt", ".python-version"];
+      if (step.name === "rust-dependencies") {
+        const channel = acquisitionRustChannel(files);
+        if (channel) await acquisition.writeTextFile({ path: "rust-toolchain", content: channel });
+      }
+      if (step.name === "python-dependencies" && files.has(".python-version")) version(files.get(".python-version")!, "Python");
+      for (const path of inputs) if (files.has(path)) await acquisition.writeTextFile({ path, content: files.get(path)! });
+      await requireSandboxCommand(acquisition, `set -eu\nexport PATH="$HOME/.local/bin:$PATH"\ncd /workspace\n${safe}`, `Code-free ${step.name} acquisition`);
+    }
+    extraRoots = await acquireLockedEcosystemDependencies(acquisition, files, paths);
+    return plan;
+  }, acquisitionFactory, () => extraRoots);
+  await materializeLockedEcosystemDependencies(sandbox, files);
   const completedSteps: string[] = [];
   let browser: EnvironmentSetup["browser"];
   for (const step of plan.steps) {
-    if (step.name === "reviewer-browser-runtime") {
-      browser = await prepareReviewerBrowser(sandbox);
+    if (isTrustedRuntimeStep(step)) {
       completedSteps.push(step.name);
       continue;
     }
-    const result = await sandbox.run({ command: `set -eu\nexport PATH=\"$HOME/.local/bin:$PATH\"\ncd /workspace\n${step.command}` });
+    if (step.name === "reviewer-browser-runtime") {
+      browser = await prepareReviewerBrowser(sandbox, false);
+      completedSteps.push(step.name);
+      continue;
+    }
+    const result = await sandbox.run({ command: `set -eu\nexport PATH=\"$HOME/.local/bin:$PATH\"\ncd /workspace\n${step.name === "repository-dependencies" ? `${step.command} --offline` : step.name === "browser-runtime" ? "node_modules/.bin/playwright install chromium" : step.command}` });
     if (result.exitCode !== 0) throw new Error(`Review environment setup failed at ${step.name} (exit ${result.exitCode}): ${String(result.stderr || result.stdout).slice(-2000)}`);
     completedSteps.push(step.name);
   }

@@ -21,6 +21,7 @@ import {
 } from "../src/review/evidence-ledger";
 import { writeReviewEvidenceManifest } from "../src/review/evidence-bundle";
 import { countPatchTokens, prepareReviewEvidence } from "../src/review/prepare-review-evidence";
+import { localWorkspaceReceiptPath, physicalWorkspaceReceipt } from "../src/review/physical-workspace";
 import readReviewEvidenceTool from "../agent/tools/read_review_evidence";
 import { withTrustedReviewContext } from "../src/github/trusted-context";
 import { parseReviewConfig } from "../src/config/review-config";
@@ -249,6 +250,7 @@ describe("exact-head evidence replay", () => {
       },
       async run({ command }: { readonly command: string }) {
         commands.push(command);
+        if (command === "cd /workspace && git rev-parse --verify HEAD") return { exitCode: 0, stderr: "", stdout: headSha };
         return {
           exitCode: 0,
           stderr: "",
@@ -276,7 +278,7 @@ describe("exact-head evidence replay", () => {
       entries: [],
     };
     const capabilities = await runCapabilityPreflight(runtime, identity, {
-      revision: "review-environment-v1", headSha: identity.headSha,
+      revision: "review-environment-v2-isolated-acquisition", headSha: identity.headSha,
       inputsDigest: "a".repeat(64), tools: [], completedSteps: [],
     });
     await writeReviewEvidenceManifest(runtime, manifest);
@@ -315,6 +317,11 @@ describe("exact-head evidence replay", () => {
     const preparation = {
       config: parseReviewConfig(null),
       planKind: identity.planKind,
+      workspaceDependencies: {
+        async createAcquisitionSandbox(): Promise<never> { throw new Error("Offline ledger reuse must not create an acquisition VM"); },
+        async getMergeBase(): Promise<never> { throw new Error("Offline ledger reuse must not fetch repository metadata"); },
+        async getInstallationToken(): Promise<never> { throw new Error("Offline ledger reuse must not contact Connect"); },
+      },
       async collectMemory() {
         collectionCalls += 1;
         return {
@@ -327,6 +334,7 @@ describe("exact-head evidence replay", () => {
         return github;
       },
     };
+    await runtime.writeTextFile({ path: localWorkspaceReceiptPath, content: physicalWorkspaceReceipt(undefined, trusted, ledger) });
 
     const reused = await prepareReviewEvidence(
       runtime as unknown as RuntimeSandboxSession,
@@ -337,7 +345,7 @@ describe("exact-head evidence replay", () => {
 
     expect(reused).toEqual(ledger);
     expect(collectionCalls).toBe(0);
-    expect(commands).toEqual([]);
+    expect(commands).toEqual(["cd /workspace && git rev-parse --verify HEAD"]);
 
     const execute = readReviewEvidenceTool.execute;
     if (!execute) throw new Error("Evidence tool must have an executor");

@@ -96,7 +96,7 @@ describe("runtime project lanes", () => {
     const observed: string[] = [];
     const plan = { ...identity, rootSessionId: "root", commonPrefix: "Trusted fixture", activeAxes: axes, lanes: wide.lanes ?? [], laneRegistryDigest: projectLaneRegistryDigest(wide) };
     const call = async ({ message }: { message: string }) => { observed.push(message); return {}; };
-    const verifyLane = async (_raw: unknown, axis: ReviewAxis, attempt: number) => ({ receipt: { axis, status: "complete" as const, scoutRequests: [], checkpoint: "fixture" }, attestation: { version: 1 as const, rootSessionId: "root", invocationId: "fixture", axis, attempt, operation: "read" as const, ...identity, revision: 1, status: "complete" as const, checkpointDigest: "f".repeat(64) } });
+    const verifyLane = async (_raw: unknown, axis: ReviewAxis, attempt: number) => ({ receipt: { axis, status: "complete" as const, scoutRequests: [], checkpoint: "fixture" }, attestation: { version: 2 as const, rootSessionId: "root", invocationId: "fixture", axis, attempt, operation: "read" as const, ...identity, revision: 1, status: "complete" as const, progressDigest: "e".repeat(64), checkpointDigest: "f".repeat(64) } });
     expect(await orchestrateReview({ plan, invocationPrefix: "run", call, verifyLane })).toMatchObject({ activeAxes: axes });
     expect(observed).toHaveLength(18);
     expect(observed.every((message) => message.includes(lane.criteria))).toBe(true);
