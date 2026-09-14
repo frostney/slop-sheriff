@@ -1,8 +1,8 @@
-import { z } from "zod";
 import { reviewWorkInputSchema } from "../review/work-execution";
 import { reviewWorkReceiptSchema } from "../review/work-receipt";
 import { inspectReviewSourceInputSchema } from "../review/source-observations";
-import { runReviewProbeInputSchema } from "../review/probe-execution";
+import { runReviewProbeInputSchema, readReviewProbeInputSchema } from "../review/probe-execution";
+import { z } from "zod";
 
 export const qualityCommonPrefix =
   "Review the frozen corpus claim using the assigned work packet. Do not access later revisions.";
@@ -26,13 +26,9 @@ export const qualityWorkTools = {
       "Execute a real test or experiment and record its actual inputs, environment and full result.",
     inputSchema: runReviewProbeInputSchema,
   },
-  read_review_probe_output: {
+  read_review_probe: {
     description: "Read another page of complete recorded test output.",
-    inputSchema: z.strictObject({
-      probeId: z.string(),
-      stream: z.enum(["stdout", "stderr"]),
-      cursor: z.number().int().nonnegative().nullable(),
-    }),
+    inputSchema: readReviewProbeInputSchema,
   },
 };
 export function qualityWorkToolSchemas() {
@@ -40,6 +36,6 @@ export function qualityWorkToolSchemas() {
     type: "function",
     name,
     description: value.description,
-    inputSchema: z.toJSONSchema(value.inputSchema),
+    inputSchema: z.toJSONSchema(value.inputSchema, { io: "input" }),
   }));
 }

@@ -2,6 +2,14 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
 
 const args = { attemptId: v.string(), path: v.string(), owner: v.string() };
+export const vEvidenceWriteClaim = v.object({ path: v.string(), owner: v.string() });
+
+/** Called in the same transaction as the write, so release fences delayed HTTP requests. */
+export async function evidenceWriteClaimIsCurrent(ctx: Pick<QueryCtx, "db">, attemptId: string, writeClaim: { path: string; owner: string } | undefined): Promise<boolean> {
+  if (!writeClaim) return true; // Application writes outside evidence locks retain admission checks.
+  const claim = await ctx.db.query("reviewProbeClaims").withIndex("by_attemptId_and_path", q => q.eq("attemptId", attemptId).eq("path", writeClaim.path)).unique();
+  return claim?.owner === writeClaim.owner && claim.status === "running";
+}
 
 async function assertCurrentAttempt(ctx: QueryCtx, attemptId: string): Promise<void> {
   const job = await ctx.db.query("reviewDeliveries").withIndex("by_attemptId", q => q.eq("attemptId", attemptId)).unique();

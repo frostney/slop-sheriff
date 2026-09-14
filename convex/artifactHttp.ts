@@ -2,18 +2,18 @@ import type { HttpRouter } from "convex/server";
 import { z } from "zod";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { artifactEnvelopeSchema, artifactPathSchema } from "../src/review/durable-evidence-contracts";
+import { artifactEnvelopeSchema, artifactPathSchema, evidenceWriteClaimSchema } from "../src/review/durable-evidence-contracts";
 
 export function registerArtifactRoutes(http: HttpRouter, isAuthorized: (request: Request) => Promise<boolean>): void {
   http.route({ path: "/review-artifacts/put", method: "POST", handler: httpAction(async (ctx, request) => {
     if (!await isAuthorized(request)) return new Response(null, { status: 401 });
-    const parsed = artifactEnvelopeSchema.extend({ revision: z.number().int().positive().optional() }).safeParse(await request.json().catch(() => null));
+    const parsed = artifactEnvelopeSchema.extend({ revision: z.number().int().positive().optional(), writeClaim: evidenceWriteClaimSchema.optional() }).safeParse(await request.json().catch(() => null));
     if (!parsed.success) return new Response(null, { status: 400 });
-    const { signedContent, revision, ...metadata } = parsed.data;
+    const { signedContent, revision, writeClaim, ...metadata } = parsed.data;
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(signedContent))), byte => byte.toString(16).padStart(2, "0")).join("");
     const storageId = await ctx.storage.store(new Blob([signedContent], { type: "text/plain" }));
     try {
-      const stored = await ctx.runMutation(internal.artifactData.put, { ...metadata, storageId, digest, ...(revision !== undefined ? { revision } : {}) });
+      const stored = await ctx.runMutation(internal.artifactData.put, { ...metadata, storageId, digest, ...(revision !== undefined ? { revision } : {}), ...(writeClaim ? { writeClaim } : {}) });
       if (!stored) await ctx.storage.delete(storageId);
       return Response.json({ stored: true });
     } catch (error) { await ctx.storage.delete(storageId); throw error; }

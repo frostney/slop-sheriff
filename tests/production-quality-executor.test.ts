@@ -104,6 +104,8 @@ test("official mock transport exercises production initial-plus-fix review, prob
   const emittedTools: string[] = [];
   let failPublication = true;
   let failProvider = true;
+  let malformedReportSent = false;
+  let malformedReportObserved = false;
   let priorFailure: QualityExecutionFailure | undefined;
   const routes: ReviewRoute[] = [];
   const requestedModels: string[] = [];
@@ -227,6 +229,9 @@ test("official mock transport exercises production initial-plus-fix review, prob
       let context: ReturnType<typeof reviewWorkContext> | null = null;
       return new MockLanguageModelV4({
         doGenerate: async (options) => {
+          if (options.prompt.some(message => message.role === "tool" && message.content.some(part =>
+            part.type === "tool-result" && part.toolCallId === "malformed-review-report" &&
+            (part.output.type === "error-text" || part.output.type === "error-json")))) malformedReportObserved = true;
           if (failProvider) {
             failProvider = false;
             throw new APICallError({
@@ -244,13 +249,18 @@ test("official mock transport exercises production initial-plus-fix review, prob
             );
           const output = (name: string, input: unknown) => {
             emittedTools.push(name);
+            const missingReport = name === "review_work" && !malformedReportSent &&
+              typeof input === "object" && input !== null && "action" in input &&
+              typeof input.action === "object" && input.action !== null &&
+              "operation" in input.action && input.action.operation === "complete";
+            if (missingReport) malformedReportSent = true;
             return {
               content: [
                 {
                   type: "tool-call" as const,
-                  toolCallId: `call-${step++}`,
+                  toolCallId: missingReport ? `malformed-review-report` : `call-${step++}`,
                   toolName: name,
-                  input: JSON.stringify(input),
+                  input: JSON.stringify(missingReport ? { action: { operation: "complete", reviewedEntries: [] } } : input),
                 },
               ],
               finishReason: {
@@ -351,9 +361,7 @@ test("official mock transport exercises production initial-plus-fix review, prob
           if (route.role !== "lane") throw new Error("Unexpected model role");
           if (step === 0)
             return output("review_work", {
-              operation: "read",
-              checkpoint: null,
-              escalation: null,
+              action: { operation: "read" },
             });
           for (const message of currentTurn)
             if (message.role === "tool")
@@ -375,16 +383,14 @@ test("official mock transport exercises production initial-plus-fix review, prob
           if (step === 1 && staticClient && !progressed.has(context.workId)) {
             progressed.add(context.workId);
             return output("review_work", {
-              operation: "write",
-              escalation: null,
-              checkpoint: {
-                status: "in-progress",
+              action: {
+                operation: "progress",
+                escalation: null,
                 reviewedEntries: [],
                 remainingEntries: context.entries.map((entry) => entry.index),
                 observations: [],
                 nextSteps: ["Inspect the independent client label change"],
                 limitations: [],
-                completedReport: null,
               },
             });
           }
@@ -443,16 +449,10 @@ test("official mock transport exercises production initial-plus-fix review, prob
             })),
           );
           return output("review_work", {
-            operation: "write",
-            escalation: null,
-            checkpoint: {
-              status: "complete",
+            action: {
+              operation: "complete",
               reviewedEntries: context.entries.map((entry) => entry.index),
-              remainingEntries: [],
-              observations: [],
-              nextSteps: [],
-              limitations: [],
-              completedReport: {
+              report: {
                 axis: route.axis,
                 scope: {
                   claim: context.claim,
@@ -527,6 +527,8 @@ test("official mock transport exercises production initial-plus-fix review, prob
     const modelCallsBeforeRecovery = routes.length;
     const recovered = await executor.execute(inputs[0]!, config);
     expect(recovered.coverageComplete).toBe(true);
+    expect(malformedReportSent).toBe(true);
+    expect(malformedReportObserved).toBe(true);
     expect(recovered.costRows).toEqual([]);
     expect(routes.length).toBe(modelCallsBeforeRecovery);
     const routesBeforeVoice = routes.length;

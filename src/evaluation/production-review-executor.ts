@@ -29,7 +29,7 @@ import {
   captureReviewWorkProof,
   validateCurrentReviewWorkProof,
 } from "../review/prepare-review-work";
-import { reviewWorkContext, persistReviewWork } from "../review/work-execution";
+import { reviewWorkContext, reviewWorkCheckpoint, persistReviewWork } from "../review/work-execution";
 import {
   reviewWorkResultArtifactSchema,
   reviewWorkReceiptSchema,
@@ -47,6 +47,7 @@ import {
 import { workHash } from "../review/work-plan";
 import {
   observeReviewSource,
+  sourceInspectionRequest,
   recordWorkSourceObservation,
   sourceObservationPage,
 } from "../review/source-observations";
@@ -458,7 +459,7 @@ export function createProductionReviewQualityExecutor(
               const observation = await observeReviewSource(
                 w.sandbox,
                 w.trusted,
-                request,
+                sourceInspectionRequest(request),
               );
               await recordWorkSourceObservation(
                 w.sandbox,
@@ -473,7 +474,7 @@ export function createProductionReviewQualityExecutor(
           });
         const outputTool = (workId: string) =>
           tool({
-            ...qualityWorkTools.read_review_probe_output,
+            ...qualityWorkTools.read_review_probe,
             execute: async (request) => {
               const receipts = await readWorkProbeReceipts(
                   w.sandbox,
@@ -481,7 +482,7 @@ export function createProductionReviewQualityExecutor(
                   workId,
                 ),
                 receipt = receipts.find(
-                  (item) => item.probeId === request.probeId,
+                  (item) => item.probeId === request.probeId && item.executionId === request.executionId,
                 );
               if (!receipt)
                 throw new Error("Output does not belong to this assigned work");
@@ -558,7 +559,7 @@ export function createProductionReviewQualityExecutor(
               stopWhen: () => completion.final,
               telemetry: { integrations: telemetry(route, session.sessionId) },
               tools: {
-                read_review_probe_output: outputTool(unit.id),
+                read_review_probe: outputTool(unit.id),
                 final_output: tool({
                   ...qualityWorkTools.final_output,
                   execute: async (receipt) => {
@@ -578,9 +579,10 @@ export function createProductionReviewQualityExecutor(
                 run_review_probe: probeTool(unit.id, session.sessionId),
                 review_work: tool({
                   ...qualityWorkTools.review_work,
-                  execute: async (action) => {
+                  execute: async ({ action }) => {
                     if (action.operation === "read")
                       return reviewWorkContext(packet);
+                    const { checkpoint, escalation } = reviewWorkCheckpoint(action);
                     const proof = await captureReviewWorkProof(
                       w.sandbox,
                       prepared.patchFingerprint,
@@ -592,9 +594,9 @@ export function createProductionReviewQualityExecutor(
                       packet,
                       attemptId: w.trusted.deliveryId!,
                       assertCurrent: () => claims.assertCurrent(),
-                      checkpoint: action.checkpoint!,
+                      checkpoint,
                       proof,
-                      escalation: action.escalation ?? null,
+                      escalation,
                       invocation: {
                         rootSessionId,
                         invocationId: dispatch.key,
@@ -746,7 +748,7 @@ export function createProductionReviewQualityExecutor(
             tools: {
               inspect_review_source: sourceTool(prepared.units[0]!.id),
               run_review_probe: probeTool(prepared.units[0]!.id, sessionId),
-              read_review_probe_output: outputTool(prepared.units[0]!.id),
+              read_review_probe: outputTool(prepared.units[0]!.id),
               final_output: tool({
                 description:
                   "Return every selected prior finding with current evidence matching its original concern.",

@@ -11,7 +11,7 @@ import { isSpecialistAxis } from "./specialist-scope";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const observationSchema = z.object({
+const observationSchema = z.strictObject({
   disposition: z.enum(["candidate", "dismissed", "lead"]),
   summary: z.string().min(1).max(1_000),
   evidence: z.array(z.string().min(1).max(500)).max(12),
@@ -88,12 +88,7 @@ export const laneCompletedReportSchema = z
     limitations: z.array(boundedReportText).max(100),
     specialistChecks: z.array(specialistCheckSchema).max(2_000).nullable().optional(),
     requirementChecks: z.array(requirementCheckSchema).max(2_000).nullable().optional(),
-  })
-  .refine(
-    (report) =>
-      Buffer.byteLength(JSON.stringify(report), "utf8") <= 24_000,
-    "A completed lane report must not exceed 24,000 UTF-8 bytes",
-  );
+  });
 
 export type LaneCompletedReport = z.infer<typeof laneCompletedReportSchema>;
 

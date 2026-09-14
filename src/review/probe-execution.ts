@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
+import { evidenceWriteScope } from "./evidence-write-scope";
 import type { TextSandbox } from "./authenticated-evidence";
 import { artifactRequest } from "./durable-evidence";
 
@@ -20,6 +21,11 @@ export const runReviewProbeInputSchema = z.strictObject({
   rerun: z.boolean().describe("True requests a new independent execution, including repeated or flaky sampling. False may reuse one matching observed execution."),
 });
 export type ReviewProbeInput = z.infer<typeof runReviewProbeInputSchema>;
+
+export const readReviewProbeInputSchema = z.strictObject({
+  probeId: digestSchema, executionId: z.string().uuid(),
+  stream: z.enum(["stdout", "stderr"]), cursor: z.number().int().nonnegative().nullable(),
+});
 
 /** Only application code supplies these observations. They are absent from tool input. */
 export const probeObservationSchema = z.strictObject({
@@ -95,12 +101,13 @@ export async function withReviewEvidenceLock<T>(claims: ProbeClaims, identity: u
     await delay(250, undefined, { signal });
   }
   try {
-    const result = await action();
+    return await evidenceWriteScope.run({ path, owner }, action);
+  } finally {
+    // These are retryable evidence updates, not possibly-running commands.
+    // Both storage mutations fence this owner atomically at commit. Once release
+    // succeeds, even a timed-out HTTP write cannot overwrite a later retry.
+    // A worker lost before release still requires normal lifecycle recovery.
     await claims.release(path, owner);
-    return result;
-  } catch (error) {
-    await claims.fail(path, owner);
-    throw error;
   }
 }
 

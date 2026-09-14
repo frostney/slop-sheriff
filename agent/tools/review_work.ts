@@ -11,7 +11,7 @@ import { preparedReviewWorkPacketSchema, preparedReviewWorkPlanSchema, preparedR
 import { readCapabilityPreflight } from "../../src/review/capability-preflight";
 import { completedReviewWorkStore } from "../../src/review/work-storage";
 import { durableProbeClaims, withReviewEvidenceLock } from "../../src/review/probe-execution";
-import { reviewWorkInputSchema, reviewWorkContext, persistReviewWork } from "../../src/review/work-execution";
+import { reviewWorkInputSchema, reviewWorkCheckpoint, reviewWorkContext, persistReviewWork } from "../../src/review/work-execution";
 import { reviewWorkResultArtifactSchema } from "../../src/review/work-runtime";
 
 export { reviewWorkInputSchema } from "../../src/review/work-execution";
@@ -32,14 +32,14 @@ export const reviewTool = defineTool({
     if (packet.unit.id !== assigned.id || packet.inputDigest !== assigned.inputDigest) throw new Error("Prepared work packet does not match assignment");
     const claims = durableProbeClaims(trusted.deliveryId);
     await claims.assertCurrent();
-    if (input.operation === "read") {
+    if (input.action.operation === "read") {
       const saved = await sandbox.readTextFile({ path: assigned.resultPath });
       const parsed = saved === null ? null : reviewWorkResultArtifactSchema.safeParse(JSON.parse(saved));
       const result = parsed?.success && parsed.data.attemptId === trusted.deliveryId ? parsed.data : null;
       if (result && (result.assessment.unit.id !== assigned.id || result.assessment.inputDigest !== assigned.inputDigest || result.invocation.rootSessionId !== parent.rootSessionId)) throw new Error("Saved work progress belongs to another assignment");
       return { operation: "read" as const, context: reviewWorkContext(result ? { ...packet, priorAssessment: result.assessment, reuseInvalidation: "Continue the current saved assessment." } : packet) };
     }
-    if (!input.checkpoint) throw new Error("Work writes require a checkpoint");
+    const { checkpoint, escalation } = reviewWorkCheckpoint(input.action);
     const capabilities = await readCapabilityPreflight(sandbox, currentReviewEvidenceIdentity(ctx.session.auth.current));
     const expectedInvocationId = await expectedNativeWorkInvocation(sandbox, trusted.patchFingerprint, {
       rootSessionId: parent.rootSessionId, sessionId: ctx.session.id, initialInvocationId: parent.callId });
@@ -48,7 +48,7 @@ export const reviewTool = defineTool({
       refresh: () => refreshReviewWorkNativeHandles(ctx.session.auth.current, parent.rootSessionId, ctx.abortSignal) });
     const receipt = await withReviewEvidenceLock(claims, ["work-result", trusted.patchFingerprint, assigned.id], async () => {
       const proof = await captureReviewWorkProof(sandbox, trusted.patchFingerprint!, packet.unit, packet.inputSnapshot, trusted.deliveryId!);
-      return persistReviewWork({ packet, checkpoint: input.checkpoint!, proof, escalation: input.escalation,
+      return persistReviewWork({ packet, checkpoint, proof, escalation,
         attemptId: trusted.deliveryId!, assertCurrent: () => claims.assertCurrent(),
         invocation: { rootSessionId: parent.rootSessionId, invocationId: invocation.invocationId, sessionId: ctx.session.id, turnId: ctx.session.turn.id },
         evidence: sandbox, store: completedReviewWorkStore(trusted),

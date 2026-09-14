@@ -270,7 +270,12 @@ export function withTaskReasoning(
     model: model as Exclude<LanguageModel, string>,
     middleware: {
       specificationVersion: "v4",
-      transformParams: async ({ params }) => ({ ...params, reasoning }),
+      transformParams: async ({ params }) => ({ ...params, reasoning,
+        // Eve's authored ToolDefinition has no strict option. Set the official
+        // SDK flag at its model boundary for the audited object/variant schemas.
+        ...(params.tools ? { tools: params.tools.map(tool => tool.type === "function" &&
+          ["review_work", "inspect_review_source"].includes(tool.name) ? { ...tool, strict: true } : tool) } : {}),
+      }),
     },
   });
 }

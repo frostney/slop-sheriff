@@ -201,6 +201,13 @@ Gateway-native accounting categories remain separate.
 
 ## Local development
 
+Every change receives `/code-review` and `/test-against-spec` before delivery.
+Run both project-local skills against the current candidate without waiting for
+a separate review request. The specification review exercises real interfaces
+against explicit requirements, including failure paths. Mocked tests and the
+project gate remain separate evidence. Recheck affected results after fixes and
+report any behavior that remains unverified. See [AGENTS.md](AGENTS.md).
+
 Requirements are Bun 1.4.2 and the runtime prerequisites selected by Eve's
 local sandbox backend. The project intentionally uses Bun for installs, scripts,
 tests, and builds. Node 24 remains the deployment engine because that is the
@@ -221,6 +228,11 @@ without provisioning a hosted sandbox snapshot.
 It does not call a paid model. Convex code is also type-checked locally; a
 Convex deployment is needed only to regenerate bindings or exercise HTTP
 actions.
+
+The [model contract gate](docs/operations/model-contracts.md) covers generated
+schemas, malformed report streams and recovery through persistence and report
+assembly. These checks must pass before a paid canary; valid mock reports alone
+do not establish a working model boundary.
 
 `bun run replay:pr61` validates all four recorded Pascal MCP SDK PR 61 runs
 offline and prints phase-by-phase recorded and projected candidate timings,

@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const evidenceWriteClaimSchema = z.strictObject({ path: z.string().regex(/^\/tmp\/known-good-review\/probes\/[a-f0-9]{64}$/), owner: z.string().uuid() });
+export type EvidenceWriteClaim = z.infer<typeof evidenceWriteClaimSchema>;
+
 export const artifactBindingSchema = z.strictObject({
   repositoryId: z.string().min(1), repository: z.string().min(1), pullRequest: z.number().int().positive(),
   baseSha: z.string().min(1), headSha: z.string().min(1), patchFingerprint: z.string().regex(/^[a-f0-9]{64}$/),

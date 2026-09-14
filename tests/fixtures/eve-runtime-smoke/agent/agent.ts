@@ -7,7 +7,7 @@ import {
   type MockModelRequest,
   type MockModelResponse,
 } from "eve/evals";
-import { routingEnvelope } from "../../../../src/models/routing";
+import { routingEnvelope, withTaskReasoning } from "../../../../src/models/routing";
 import { parseSubagentRoute } from "../../../../src/models/routing";
 import { reviewTaskInstructions } from "../../../../src/review/policy";
 import productionAgent from "../../../../agent/agent";
@@ -175,7 +175,7 @@ export default defineAgent({
     events: {
       "step.started": (_event, ctx) => {
         currentReviewRoute(ctx.channel.kind, ctx.messages);
-        return { model, modelContextWindowTokens: 1_000_000 };
+        return { model: withTaskReasoning(model, "medium"), modelContextWindowTokens: 1_000_000 };
       },
     },
   }),

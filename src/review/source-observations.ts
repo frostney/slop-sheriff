@@ -15,10 +15,24 @@ function validOperation(input: z.infer<typeof requestSchema>, ctx: z.RefinementC
   if (input.operation === "read" && (input.path === null || input.query !== null)) ctx.addIssue({ code: "custom", message: "Read requires a path and null query" });
   if (input.operation === "search" && (input.query === null || input.path !== null)) ctx.addIssue({ code: "custom", message: "Search requires a literal query and null path; its scope is all tracked text" });
 }
-export const inspectReviewSourceInputSchema = requestSchema.extend({
-  cursor: z.number().int().nonnegative().nullable().describe("Character offset in the complete recorded source or search results; null starts at zero."),
+const cursorSchema = z.number().int().nonnegative().nullable().describe("Character offset in the complete recorded source or search results; null starts at zero.");
+const sourceInspectionRequestSchema = requestSchema.extend({
+  cursor: cursorSchema,
 }).superRefine(validOperation);
-export type SourceInspectionInput = z.infer<typeof inspectReviewSourceInputSchema>;
+export type SourceInspectionInput = z.infer<typeof sourceInspectionRequestSchema>;
+export const inspectReviewSourceInputSchema = z.strictObject({
+  revision: z.enum(["base", "head"]), cursor: cursorSchema,
+  target: z.union([
+    z.strictObject({ operation: z.literal("read"), path: repositoryPathSchema }),
+    z.strictObject({ operation: z.literal("search"), query: z.string().min(1).regex(/^[^\0\r\n]+$/).describe("Literal text to search across every tracked text file. Search is not restricted to a path.") }),
+  ]),
+});
+export function sourceInspectionRequest(input: z.infer<typeof inspectReviewSourceInputSchema>): SourceInspectionInput {
+  const common = { revision: input.revision, cursor: input.cursor };
+  return input.target.operation === "read"
+    ? { ...common, ...input.target, query: null }
+    : { ...common, ...input.target, path: null };
+}
 
 export const sourceObservationSchema = z.strictObject({
   schemaVersion: z.literal(1), id: fingerprintSchema,
@@ -49,7 +63,7 @@ async function run(sandbox: SourceObservationSandbox, command: string, allowNoMa
 
 /** Commands and revision identities are constructed by the application, not the model. */
 export async function observeReviewSource(sandbox: SourceObservationSandbox, revisions: { baseSha: string; headSha: string }, input: SourceInspectionInput, workspaceRoot = "/workspace"): Promise<SourceObservation> {
-  const parsed = inspectReviewSourceInputSchema.parse(input);
+  const parsed = sourceInspectionRequestSchema.parse(input);
   const { cursor: _cursor, ...request } = parsed;
   const commitSha = revisionSchema.parse(revisions[request.revision === "base" ? "baseSha" : "headSha"]);
   const treeSha = revisionSchema.parse((await run(sandbox, git(`rev-parse --verify ${quote(`${commitSha}^{tree}`)}`, workspaceRoot))).trim());

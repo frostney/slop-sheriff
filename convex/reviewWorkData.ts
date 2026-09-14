@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
 import { vCompletedWorkBinding } from "./reviewWorkTables";
+import { evidenceWriteClaimIsCurrent, vEvidenceWriteClaim } from "./probeData";
 
 /** Authorization follows the current durable PR owner, never a caller-supplied repository. */
 async function admitted(ctx: Pick<QueryCtx, "db">, currentAttemptId: string) {
@@ -10,12 +11,13 @@ async function admitted(ctx: Pick<QueryCtx, "db">, currentAttemptId: string) {
   return owner?.deliveryId === job.deliveryId ? job : null;
 }
 export const put = internalMutation({
-  args: { currentAttemptId: v.string(), binding: vCompletedWorkBinding, signature: v.string(), storageId: v.id("_storage"), byteLength: v.number() },
+  args: { currentAttemptId: v.string(), binding: vCompletedWorkBinding, signature: v.string(), storageId: v.id("_storage"), byteLength: v.number(), writeClaim: v.optional(vEvidenceWriteClaim) },
   returns: v.union(v.literal("stored"), v.literal("duplicate"), v.literal("forbidden")),
   handler: async (ctx, args) => {
     const job = await admitted(ctx, args.currentAttemptId);
     const binding = args.binding;
     if (!job || binding.sourceAttemptId !== args.currentAttemptId || binding.repositoryId !== job.repositoryId || binding.pullRequest !== job.pullRequest) return "forbidden";
+    if (!await evidenceWriteClaimIsCurrent(ctx, args.currentAttemptId, args.writeClaim)) return "forbidden";
     const previous = await ctx.db.query("completedReviewWork").withIndex("by_semantic_version", q => q.eq("binding.repositoryId", job.repositoryId).eq("binding.pullRequest", job.pullRequest).eq("binding.scopeKey", binding.scopeKey).eq("binding.inputDigest", binding.inputDigest).eq("binding.contentDigest", binding.contentDigest)).unique();
     if (previous) return "duplicate";
     // Primary inputs can stay stable while a supporting observation changes.

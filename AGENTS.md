@@ -3,6 +3,27 @@
 This is a standalone Eve agent application. Use Bun for dependency management,
 scripts, tests, and local execution. Keep `CLAUDE.md` as only `@AGENTS.md`.
 
+Every change must go through the project-local `/code-review` and
+`/test-against-spec` skills before it is reported ready, committed for delivery,
+deployed, or used in a paid review. Invoke them without waiting for the user to
+ask. Use their fix modes when implementation or remediation is already authorized.
+The required `bun run check` gate complements these reviews; it replaces neither.
+
+Review the actual candidate, including relevant untracked files. Derive behavior
+expectations from the user's decisions and explicit requirements, then exercise
+real interfaces and consequential failure paths. Unit tests, mocks and source
+inspection do not count as `/test-against-spec` behavior evidence. Documentation
+or policy changes with no executable behavior are explicitly outside that skill's
+scope and still receive code review. Install missing tools and repair test setup.
+
+After a fix, revalidate affected findings and behavior on the changed candidate;
+retain unaffected evidence only while its inputs remain valid. Report both skill
+outcomes, the reviewed revision/content, and any failed or unverified requirement.
+Do not claim completion while required behavior is unverified. Model-dependent
+quality and hosted behavior retain their separate paid authorization requirement;
+a paid canary follows the offline reviews and must never discover a deterministic
+contract mismatch. Do not turn this workflow rule into additional runtime lanes.
+
 Before changing or debugging Eve integration code, load the project-local
 official `eve` skill, then read the matching guide bundled with the installed
 `eve` package under `node_modules/eve/docs/`. Verify APIs against the installed

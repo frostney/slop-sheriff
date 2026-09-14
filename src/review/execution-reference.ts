@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const reviewExecutionReferenceSchema = z.discriminatedUnion("kind", [
+export const reviewExecutionReferenceSchema = z.union([
   z.strictObject({ kind: z.literal("probe"), id: z.string().uuid() }),
   z.strictObject({ kind: z.literal("external"), id: z.string().regex(/^[a-f0-9]{64}$/) }),
 ]);

@@ -2,16 +2,18 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { vArtifactBinding } from "./artifactTables";
+import { evidenceWriteClaimIsCurrent, vEvidenceWriteClaim } from "./probeData";
 const vMetadata = v.object({ binding: vArtifactBinding, rootScope: v.string(), signedBinding: v.string(), recoverySourceAttemptId: v.optional(v.string()) });
 const vArtifact = v.object({ ...vMetadata.fields, path: v.string(), storageId: v.id("_storage") });
 
 export const put = internalMutation({
-  args: { binding: vArtifactBinding, rootScope: v.string(), signedBinding: v.string(), path: v.string(), storageId: v.id("_storage"), digest: v.string(), revision: v.optional(v.number()) },
+  args: { binding: vArtifactBinding, rootScope: v.string(), signedBinding: v.string(), path: v.string(), storageId: v.id("_storage"), digest: v.string(), revision: v.optional(v.number()), writeClaim: v.optional(vEvidenceWriteClaim) },
   returns: v.boolean(), handler: async (ctx, args) => {
     const job = await ctx.db.query("reviewDeliveries").withIndex("by_attemptId", q => q.eq("attemptId", args.binding.attemptId)).unique();
     if (!job || !["running", "dispatching", "publishing"].includes(job.status) || job.repositoryId !== args.binding.repositoryId || job.headSha !== args.binding.headSha || job.pullRequest !== args.binding.pullRequest) throw new Error("Evidence attempt no longer owns this review");
     const owner = await ctx.db.query("reviewOwners").withIndex("by_repositoryId_and_pullRequest", q => q.eq("repositoryId", job.repositoryId).eq("pullRequest", job.pullRequest)).unique();
     if (owner?.deliveryId !== job.deliveryId) throw new Error("Evidence attempt no longer owns this review");
+    if (!await evidenceWriteClaimIsCurrent(ctx, args.binding.attemptId, args.writeClaim)) throw new Error("Evidence write lock no longer owns this update");
     const set = await ctx.db.query("reviewArtifactSets").withIndex("by_attemptId", q => q.eq("binding.attemptId", args.binding.attemptId)).unique();
     if (set && (set.signedBinding !== args.signedBinding || set.rootScope !== args.rootScope)) throw new Error("Evidence attempt binding is immutable");
     if (!set) await ctx.db.insert("reviewArtifactSets", { binding: args.binding, rootScope: args.rootScope, signedBinding: args.signedBinding, ...(job.recoverySourceAttemptId ? { recoverySourceAttemptId: job.recoverySourceAttemptId } : {}) });

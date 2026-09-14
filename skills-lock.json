@@ -145,6 +145,12 @@
       "skillPath": "status-report/SKILL.md",
       "computedHash": "7d97fe26fe6fa9672b8dad7fb5fb181bbfc43f950c90abf04f6239ef0372e20d"
     },
+    "test-against-spec": {
+      "source": "frostney/known-good-route",
+      "sourceType": "github",
+      "skillPath": "test-against-spec/SKILL.md",
+      "computedHash": "2d7715aaa430750e0b3996ff57bbf9453198bad0ef5f5d7a00d2ed22d3af16dd"
+    },
     "typescript-stack": {
       "source": "frostney/known-good-route",
       "sourceType": "github",

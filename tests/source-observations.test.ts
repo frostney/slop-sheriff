@@ -87,7 +87,7 @@ test("actual source tool JSON Schema and official Eve mock reject model-authored
   const schema = await asSchema(inspectReviewSourceInputSchema).jsonSchema;
   expect(schema).toHaveProperty("additionalProperties", false);
   for (const field of ["commitSha", "treeSha", "outputDigest", "workId", "scope", "observations"]) expect(schema).not.toHaveProperty(`properties.${field}`);
-  const input = { operation: "search", revision: "head", path: null, query: "implementation", cursor: null };
+  const input = { revision: "head", target: { operation: "search", query: "implementation" }, cursor: null };
   let calls = 0;
   let executions = 0;
   await generateText({
@@ -97,7 +97,7 @@ test("actual source tool JSON Schema and official Eve mock reject model-authored
     tools: { inspect_review_source: tool({ inputSchema: inspectReviewSourceInputSchema, execute: async () => { executions += 1; return "observed"; } }) },
   });
   expect(executions).toBe(1);
-  for (const invalid of [{ ...input, path: "src/a.ts" }, { ...input, query: "a\nb" }, { ...input, operation: "read" }, { ...input, operation: "read", query: null, path: "../escape" }]) {
+  for (const invalid of [{ ...input, target: { ...input.target, path: "src/a.ts" } }, { ...input, target: { operation: "search", query: "a\nb" } }, { ...input, target: { operation: "read" } }, { ...input, target: { operation: "read", path: "../escape" } }]) {
     expect(inspectReviewSourceInputSchema.safeParse(invalid).success).toBe(false);
   }
 });

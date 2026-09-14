@@ -1,10 +1,9 @@
 import { defineTool } from "eve/tools";
-import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { reviewRouteState } from "../lib/review-route";
-import { durableProbeClaims, readWorkProbeReceipts, reviewProbeReceiptPath, reviewProbeReceiptSchema, reviewProbeOutputPage } from "../../src/review/probe-execution";
-export const readReviewProbeInputSchema = z.strictObject({ probeId: z.string().regex(/^[a-f0-9]{64}$/), executionId: z.string().uuid(), stream: z.enum(["stdout", "stderr"]), cursor: z.number().int().nonnegative().nullable() });
+import { readReviewProbeInputSchema, durableProbeClaims, readWorkProbeReceipts, reviewProbeReceiptPath, reviewProbeReceiptSchema, reviewProbeOutputPage } from "../../src/review/probe-execution";
+export { readReviewProbeInputSchema } from "../../src/review/probe-execution";
 export default defineTool({
   description: "Read another page of a completed probe's full stdout or stderr without rerunning it. Keep following nextCursor until null when full output matters. The receipt records the execution once regardless of how many pages are read.",
   inputSchema: readReviewProbeInputSchema,

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { asSchema } from "ai";
 import { preparedReviewWorkPacketSchema } from "../src/review/prepare-review-work";
-import { persistReviewWork, reviewWorkContext, reviewWorkInputSchema } from "../src/review/work-execution";
+import { persistReviewWork, reviewWorkContext, reviewWorkCheckpointDraftSchema, reviewWorkInputSchema } from "../src/review/work-execution";
 import { workHash } from "../src/review/work-plan";
 import { reviewWorkResultArtifactSchema, reviewWorkResultPath } from "../src/review/work-runtime";
 import { reviewWorkInputDigest, snapshotReviewWorkInputs } from "../src/review/work-inputs";
@@ -12,9 +12,9 @@ function fixture() {
   const packet = preparedReviewWorkPacketSchema.parse({ schemaVersion:1,unit,inputSnapshot:snapshot,inputDigest:reviewWorkInputDigest(snapshot),
     manifest:{schemaVersion:1,baseSha:"a".repeat(40),headSha:"b".repeat(40),patchFingerprint:workHash("patch"),entries:[{path:"src/index.ts",status:"modified",kind:"excluded",patchCharacters:0,patchTokens:0,patchSha256:workHash("patch"),classification:["generated"],addedLines:0,deletedLines:0}]},
     requirements:[],originalClaim:"Validate input",priorAssessment:null,patches:[],reuseInvalidation:null });
-  const checkpoint = reviewWorkInputSchema.parse({ operation:"write",checkpoint:{status:"complete",reviewedEntries:[0],remainingEntries:[],observations:[],nextSteps:[],limitations:[],completedReport:{axis:unit.axis,
+  const checkpoint = reviewWorkCheckpointDraftSchema.parse({status:"complete",reviewedEntries:[0],remainingEntries:[],observations:[],nextSteps:[],limitations:[],completedReport:{axis:unit.axis,
     scope:{claim:packet.originalClaim,dirtyState:"Clean",inspectedSupportingContext:[]},coverage:{staticOnly:[],unreached:[]},churn:{window:"90 days",symbolCoverage:[],fileFallbacks:[]},
-    probes:[],candidates:[{title:"Reject invalid input",location:{path:"src/index.ts",line:1,symbol:null},evidence:["Input bypasses validation"],impact:"Invalid state persists",impactSummary:"Invalid state persists",remedy:"Validate at boundary",staticOnly:true,churn:null,uncertainty:[],evidenceRefs:[]}],verifiedClaims:[],limitations:[],specialistChecks:null,requirementChecks:[]}} }).checkpoint!;
+    probes:[],candidates:[{title:"Reject invalid input",location:{path:"src/index.ts",line:1,symbol:null},evidence:["Input bypasses validation"],impact:"Invalid state persists",impactSummary:"Invalid state persists",remedy:"Validate at boundary",staticOnly:true,churn:null,uncertainty:[],evidenceRefs:[]}],verifiedClaims:[],limitations:[],specialistChecks:null,requirementChecks:[]}});
   const files=new Map<string,string>(), writes:string[]=[];
   const input = {packet,checkpoint,attemptId:"current-attempt",async assertCurrent(){},proof:{schemaVersion:2,inputSnapshot:snapshot,sources:[],probes:[],external:[]},
     invocation:{rootSessionId:"root",invocationId:"native-call",sessionId:"child",turnId:"turn"},
@@ -108,24 +108,24 @@ test("fresh external evidence completes beside retained history, while stale ext
 
 test("model work draft cannot forge application identities; projection keeps storage/proof out",async()=>{
   const f=fixture();
-  expect(reviewWorkInputSchema.safeParse({operation:"write",checkpoint:f.input.checkpoint,workId:workHash("forged")} ).success).toBe(false);
+  expect(reviewWorkInputSchema.safeParse({action:{operation:"complete",reviewedEntries:[0],report:f.input.checkpoint.completedReport},workId:workHash("forged")} ).success).toBe(false);
   const forged=structuredClone(f.input.checkpoint);Object.assign(forged.completedReport!.candidates[0]!,{id:"attacker",severity:"BLOCKING"});
-  expect(reviewWorkInputSchema.safeParse({operation:"write",checkpoint:forged}).success).toBe(false);
+  expect(reviewWorkInputSchema.safeParse({action:{operation:"complete",reviewedEntries:[0],report:forged.completedReport}}).success).toBe(false);
   const model=reviewWorkContext(f.input.packet);
   expect(model).not.toHaveProperty("inputSnapshot");expect(model).not.toHaveProperty("inputDigest");
   const schema=await asSchema(reviewWorkInputSchema).jsonSchema;
   expect(schema).toHaveProperty("additionalProperties",false);
-  expect(schema).toHaveProperty("properties.checkpoint");
+  expect(schema).toHaveProperty("properties.action");
   expect(JSON.stringify(schema)).not.toContain("sourceAttemptId");
   expect(JSON.stringify(schema)).not.toContain("invocationId");
-  const reportPath = "properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties";
+  const reportPath = "properties.action.anyOf.2.properties.report.properties";
   expect(schema).toHaveProperty(`${reportPath}.candidates.items.required`, expect.arrayContaining(["evidenceRefs"]));
   expect(schema).toHaveProperty(`${reportPath}.probes.items.required`, expect.arrayContaining(["evidenceRefs"]));
   expect(schema).toHaveProperty(`${reportPath}.specialistChecks.anyOf.0.items.required`, expect.arrayContaining(["evidenceRefs"]));
   expect(schema).toHaveProperty(`${reportPath}.requirementChecks.anyOf.0.items.required`, expect.arrayContaining(["evidenceRefs"]));
   const missing = structuredClone(f.input.checkpoint);
   const { evidenceRefs: _refs, ...candidateWithoutRefs } = missing.completedReport!.candidates[0]!;
-  expect(reviewWorkInputSchema.safeParse({operation:"write",checkpoint:{...missing,completedReport:{...missing.completedReport,candidates:[candidateWithoutRefs]}}}).success).toBe(false);
+  expect(reviewWorkInputSchema.safeParse({action:{operation:"complete",reviewedEntries:[0],report:{...missing.completedReport,candidates:[candidateWithoutRefs]}}}).success).toBe(false);
 
 });
 

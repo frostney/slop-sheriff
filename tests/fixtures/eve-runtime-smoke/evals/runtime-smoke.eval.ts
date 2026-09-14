@@ -10,6 +10,14 @@ export default defineEval({
     capabilityTurn.expectOk();
     capabilityTurn.messageIncludes("CAPABILITY-RESOLUTION-COMPLETE");
     capabilityTurn.noFailedActions();
+    const capabilityChildEvent = capabilityTurn.events.find(event => event.type === "subagent.called");
+    if (!capabilityChildEvent || capabilityChildEvent.type !== "subagent.called") throw new Error("Capability child was not dispatched");
+    const capabilityChild = await t.target.attachSession(capabilityChildEvent.data.childSessionId);
+    capabilityChild.succeeded();
+    // SDK input rejection precedes action execution, so these are model-visible
+    // validation errors, not failed executor actions in Eve's calledTool view.
+    capabilityChild.messageIncludes("SOURCE-AND-REPORT-INPUTS-REJECTED");
+    capabilityChild.noFailedActions();
 
     // Exercise production channel discovery and Nitro's compiled route names.
     // Content and host-policy matrices remain in the landing unit tests.

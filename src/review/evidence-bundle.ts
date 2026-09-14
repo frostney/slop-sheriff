@@ -18,11 +18,8 @@ export const reviewFileStatusSchema = z.enum([
 export const repositoryPathSchema = z
   .string()
   .min(1)
-  .refine(
-    (path) =>
-      !path.startsWith("/") &&
-      !path.includes("\\") &&
-      !path.split("/").some((segment) => segment === "." || segment === ".."),
+  .regex(
+    /^(?!\/)(?![\s\S]*\\)(?![\s\S]*(?:^|\/)\.{1,2}(?:\/|$))[\s\S]+$/,
     "Review evidence paths must be repository-relative",
   );
 

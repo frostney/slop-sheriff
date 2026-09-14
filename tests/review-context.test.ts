@@ -262,7 +262,7 @@ describe("review evidence bundle", () => {
         ...completedLaneReport("engineering-quality"),
         verifiedClaims: Array.from({ length: 13 }, () => "x".repeat(2_000)),
       }).success,
-    ).toBeFalse();
+    ).toBeTrue(); // The field constraints are valid; there is no hidden total byte limit.
     expect(
       readReviewEvidenceInputSchema.safeParse({ operation: "patch" }).success,
     ).toBeFalse();

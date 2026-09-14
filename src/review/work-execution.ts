@@ -18,14 +18,43 @@ export const reviewWorkCheckpointDraftSchema = laneCheckpointDraftContentSchema.
   }).nullable(),
 });
 
-export const reviewWorkInputSchema = z.strictObject({
-  operation: z.enum(["read", "write"]),
-  checkpoint: reviewWorkCheckpointDraftSchema.nullable(),
-  escalation: reviewWorkEscalationSchema.nullable().optional().describe("Request stronger reasoning only for unresolved technical ambiguity or conflicting evidence; null otherwise. Persist concrete progress first. Missing setup is repaired, never escalated as a model issue."),
-}).superRefine((input, ctx) => {
-  if ((input.operation === "read") !== (input.checkpoint === null)) ctx.addIssue({ code: "custom", message: "Read requires null checkpoint; write requires checkpoint content" });
-  if (input.escalation && (input.operation !== "write" || input.checkpoint?.status !== "in-progress")) ctx.addIssue({code:"custom",message:"Escalation requires unfinished work with retained progress"});
+// The wire contract expresses operation variants instead of relying on invisible
+// cross-field refinements. The application owns terminal checkpoint bookkeeping.
+const completedReport = reviewWorkCheckpointDraftSchema.shape.completedReport.unwrap();
+const modelReport = completedReport.safeExtend({
+  // Presentation is produced by adjudication, not by the technical investigator.
+  candidates: z.array(completedReport.shape.candidates.element.omit({ introduction: true, principle: true, risk: true })),
 });
+const checkpointFields = reviewWorkCheckpointDraftSchema.shape;
+export const reviewWorkInputSchema = z.strictObject({
+  action: z.union([
+    z.strictObject({ operation: z.literal("read") }),
+    z.strictObject({
+      operation: z.literal("progress"),
+      reviewedEntries: checkpointFields.reviewedEntries,
+      remainingEntries: checkpointFields.remainingEntries,
+      observations: checkpointFields.observations,
+      nextSteps: checkpointFields.nextSteps,
+      limitations: checkpointFields.limitations,
+      escalation: reviewWorkEscalationSchema.nullable().describe("Stronger reasoning for unresolved technical ambiguity or conflicting evidence, or null. Missing setup must be repaired."),
+    }),
+    z.strictObject({
+      operation: z.literal("complete"),
+      reviewedEntries: checkpointFields.reviewedEntries,
+      report: modelReport.describe("The complete technical assessment. Required even when no findings exist. Put terminal limitations here."),
+    }),
+  ]),
+});
+
+export function reviewWorkCheckpoint(action: Exclude<z.infer<typeof reviewWorkInputSchema>["action"], { operation: "read" }>) {
+  if (action.operation === "complete") return {
+    checkpoint: reviewWorkCheckpointDraftSchema.parse({ status: "complete", reviewedEntries: action.reviewedEntries,
+      remainingEntries: [], observations: [], nextSteps: [], limitations: [], completedReport: action.report }),
+    escalation: null,
+  };
+  const { operation: _operation, escalation, ...progress } = action;
+  return { checkpoint: reviewWorkCheckpointDraftSchema.parse({ ...progress, status: "in-progress", completedReport: null }), escalation };
+}
 
 /** Only investigation context enters the model. Signatures, dependency receipts,
  * storage keys and source histories remain application-owned. */

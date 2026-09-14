@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { withEvidenceWriteClaim } from "./evidence-write-scope";
 import type { TrustedGitHubContext } from "../github/trusted-context";
 import { evidenceSigningKey } from "./authenticated-evidence";
 import { completedWorkBindingSchema, completedWorkEnvelopeSchema, completedWorkKeySchema, workDigestSchema, type CompletedWorkEnvelope, type CompletedWorkKey } from "./work-storage-contracts";
@@ -25,7 +26,7 @@ export async function completedWorkRequest(operation: "put" | "get" | "latest", 
   const base = process.env.CONVEX_MEMORY_URL?.replace(/\/$/, "");
   const token = process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN;
   if (!base || !token) throw new Error("Completed review work storage is not configured");
-  const response = await fetch(`${base}/review-work/${operation}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  const response = await fetch(`${base}/review-work/${operation}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(operation === "put" ? withEvidenceWriteClaim(body) : body), signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Completed review work ${operation} failed (${response.status})`);
   return response.json();
 }

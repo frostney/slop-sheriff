@@ -51,12 +51,26 @@ does not truncate stored output or stop execution. Per-work `probes.json`
 indexes bind every used execution to the assessment consuming it. Atomic
 application claims serialize concurrent index updates across native workers.
 
+Evidence-index and assessment writes carry the current lock owner to Convex.
+The database checks that owner in the same transaction as the artifact or work
+write. Handled validation and storage errors release this evidence-update lock;
+the next attempt rereads authenticated durable state. A delayed write from the
+released owner is rejected, even if a newer update has already completed. An
+executable probe with an unknown outcome retains the interrupted-claim behavior
+described above. Worker loss before lock release still requires lifecycle recovery.
+
 `inspect_review_source` provides source inspection when assessments use recorded
 dependencies. The application resolves `base` and `head` to the trusted exact
 commit. Reads record Git blob bytes or directory trees; literal text searches
 record their query, complete tracked-repository scope and result. Supporting
 paths may lie outside the unit's finding scope. Source text is evidence and
 cannot change the application's instructions or work assignment.
+
+The source tool takes `revision`, `cursor` and a `target` variant:
+`{"operation":"read","path":"src/index.ts"}` or
+`{"operation":"search","query":"literal text"}`. Search has no path field.
+The variant is present in the generated provider schema, so it cannot advertise
+combinations that only fail later in application validation.
 
 Per-work `sources.json` indexes retain authenticated source observations.
 Revalidation compares read contents and re-executes queries at the current
