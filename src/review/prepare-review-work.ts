@@ -123,6 +123,43 @@ export async function prepareReviewWork(sandbox: ReviewWorkSandbox, trusted: Tru
   const store = dependencies.store === undefined ? lifecycleConfigured() ? completedReviewWorkStore(trusted) : null : dependencies.store;
   const units: PreparedReviewWorkPlan["units"] = [];
   const requirementText = new Map<string, Promise<{ source: RequirementSource; baseText: string | null; headText: string | null }>>();
+  // These caches live only for this trusted preparation. Overlapping specialists
+  // consume identical immutable inputs without repeating remote reads or copies.
+  const patchInputs = new Map<string, Promise<PreparedReviewWorkPacket["patches"][number]>>();
+  const historicalCommits = new Map<string, Promise<boolean>>();
+  function historicalCommitExists(previous: string): Promise<boolean> {
+    let pending = historicalCommits.get(previous);
+    if (!pending) {
+      pending = Promise.resolve(sandbox.run({ command: `cd /workspace && printf '%s\\n' ${previous} | git cat-file --batch-check='%(objecttype)'` })).then(result => {
+        if (result.exitCode !== 0) throw new Error("Could not inspect the historical review revision");
+        return String(result.stdout).trim() === "commit";
+      });
+      historicalCommits.set(previous, pending);
+    }
+    return pending;
+  }
+  async function patchInput(entry: ReviewEvidenceManifest["entries"][number], previous: string | null): Promise<PreparedReviewWorkPacket["patches"][number]> {
+    if (entry.kind === "excluded") return { path: entry.path, content: `Excluded payload: ${entry.classification.join(", ")}. Added ${entry.addedLines}, removed ${entry.deletedLines} lines. Inspect the actual artifact when relevant.`, fromHead: null };
+    const fromHead = previous && await historicalCommitExists(previous) ? previous : null;
+    const key = JSON.stringify([fromHead, entry.path]);
+    let pending = patchInputs.get(key);
+    if (!pending) {
+      pending = (async () => {
+        let raw: string;
+        let rawPatchPath = `${reviewEvidenceDirectory(manifest.patchFingerprint)}/${entry.patchFile}`;
+        if (fromHead) {
+          const delta = await sandbox.run({ command: `cd /workspace && git --literal-pathspecs diff --no-ext-diff --no-textconv --full-index ${fromHead} ${revision.parse(trusted.headSha)} -- ${quote(entry.path)}` });
+          if (delta.exitCode !== 0) throw new Error("Could not prepare incremental review work patch");
+          raw = String(delta.stdout);
+          rawPatchPath = `/tmp/known-good-review/work/${manifest.patchFingerprint}/patches/${fromHead}/${createHash("sha256").update(entry.path).digest("hex")}.patch`;
+          await sandbox.writeTextFile({ path: rawPatchPath, content: raw });
+        } else raw = await readRawPreparedPatch(sandbox, manifest, entry);
+        return { path: entry.path, content: projectEmbeddedMediaPatch(raw, { path: entry.path, rawPatchPath }), fromHead };
+      })();
+      patchInputs.set(key, pending);
+    }
+    return pending;
+  }
   for (const unit of plan.units) {
     const inputSnapshot = snapshotReviewWorkInputs({ unit, base, head, requirements: input.requirements, claim: input.claim });
     const inputDigest = reviewWorkInputDigest(inputSnapshot);
@@ -157,23 +194,9 @@ export async function prepareReviewWork(sandbox: ReviewWorkSandbox, trusted: Tru
       return pending;
     }));
     const patches: PreparedReviewWorkPacket["patches"] = [];
+    const previous = priorAssessment && priorAssessment.sourceHeadSha !== trusted.headSha ? revision.parse(priorAssessment.sourceHeadSha) : null;
     for (const entry of workUnitManifest(manifest, unit).entries) {
-      if (entry.kind === "excluded") { patches.push({ path: entry.path, content: `Excluded payload: ${entry.classification.join(", ")}. Added ${entry.addedLines}, removed ${entry.deletedLines} lines. Inspect the actual artifact when relevant.`, fromHead: null }); continue; }
-      let raw: string;
-      let fromHead: string | null = null;
-      if (priorAssessment && priorAssessment.sourceHeadSha !== trusted.headSha) {
-        const previous = revision.parse(priorAssessment.sourceHeadSha);
-        const exists = await sandbox.run({ command: `cd /workspace && printf '%s\\n' ${previous} | git cat-file --batch-check='%(objecttype)'` });
-        if (exists.exitCode !== 0) throw new Error("Could not inspect the historical review revision");
-        if (String(exists.stdout).trim() === "commit") {
-          const delta = await sandbox.run({ command: `cd /workspace && git --literal-pathspecs diff --no-ext-diff --no-textconv --full-index ${previous} ${revision.parse(trusted.headSha)} -- ${quote(entry.path)}` });
-          if (delta.exitCode !== 0) throw new Error("Could not prepare incremental review work patch");
-          raw = String(delta.stdout); fromHead = previous;
-        } else raw = await readRawPreparedPatch(sandbox, manifest, entry);
-      } else raw = await readRawPreparedPatch(sandbox, manifest, entry);
-      const rawPatchPath = `/tmp/known-good-review/work/${manifest.patchFingerprint}/${unit.id}/${createHash("sha256").update(entry.path).digest("hex")}.patch`;
-      await sandbox.writeTextFile({ path: rawPatchPath, content: raw });
-      patches.push({ path: entry.path, content: projectEmbeddedMediaPatch(raw, { path: entry.path, rawPatchPath }), fromHead });
+      patches.push(await patchInput(entry, previous));
     }
     const packetPath = preparedReviewWorkPacketPath(manifest.patchFingerprint, unit.id);
     const resultPath = preparedReviewWorkResultPath(manifest.patchFingerprint, unit.id);

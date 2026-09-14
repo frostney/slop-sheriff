@@ -13,6 +13,7 @@ import { reviewWorkAssessmentSchema, workAssessmentStorageKey, type ReviewWorkAs
 import { observeReviewSource } from "../src/review/source-observations";
 import { completedReviewWorkStore, type CompletedReviewWork } from "../src/review/work-storage";
 import type { CompletedWorkEnvelope } from "../src/review/work-storage-contracts";
+import type { ReviewAxis } from "../src/review/axes";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "sheriff-work-"));
@@ -49,7 +50,7 @@ async function fixture() {
     if (operation === "get") return envelopes.get(`${input.scopeKey}/${input.inputDigest}`) ?? null;
     return [...envelopes.values()].reverse().find(item=>item.binding.scopeKey === input.scopeKey) ?? null;
   }});
-  async function prepare(head: string, overrides: {claim?:string;attemptId?:string;store?:Parameters<typeof prepareReviewWork>[3]} = {}) {
+  async function prepare(head: string, overrides: {claim?:string;attemptId?:string;axes?:ReviewAxis[];store?:Parameters<typeof prepareReviewWork>[3]} = {}) {
     const patchFingerprint = workHash([baseSha,head]);
     const paths = ["src/a/index.ts","src/b/index.ts"];
     const entries = [];
@@ -59,7 +60,7 @@ async function fixture() {
     }
     const manifest = reviewEvidenceManifestSchema.parse({schemaVersion:1,baseSha,headSha:head,patchFingerprint,entries});
     const trusted = {...context,deliveryId:overrides.attemptId??context.deliveryId,installationId:1,owner:"acme",repo:"widget",repository:"acme/widget",repositoryDatabaseId:1,repositoryCreatedAt:0,baseSha,headSha:head,patchFingerprint};
-    const plan = await prepareReviewWork(sandbox,trusted,{manifest,requirements:[],decisions:[{axis:"engineering-quality",selected:true,reason:"Core review",paths}],config:{lanes:[]},claim:overrides.claim??"Implement both component constants."},overrides.store ?? {store});
+    const plan = await prepareReviewWork(sandbox,trusted,{manifest,requirements:[],decisions:(overrides.axes ?? ["engineering-quality"]).map(axis => ({axis,selected:true,reason:"Required review",paths})),config:{lanes:[]},claim:overrides.claim??"Implement both component constants."},overrides.store ?? {store});
     const packets = await Promise.all(plan.units.map(async unit=>preparedReviewWorkPacketSchema.parse(JSON.parse((await sandbox.readTextFile({path:unit.packetPath}))!))));
     return {plan,packets,trusted};
   }
@@ -70,6 +71,55 @@ async function fixture() {
   async function save(record: ReviewWorkAssessment) { await store.put({...workAssessmentStorageKey(record),data:JSON.stringify(record)}); }
   return {root,files,runtime,sandbox,git,commit,baseSha,headSha,prepare,assessment,save,store,cleanup:()=>rm(root,{recursive:true,force:true})};
 }
+
+test("overlapping specialists share immutable patch I/O without losing their independent inputs", async () => {
+  const f = await fixture();
+  try {
+    const reads: string[] = [], writes: string[] = [];
+    const read = f.runtime.readTextFile, write = f.runtime.writeTextFile;
+    f.runtime.readTextFile = async input => { reads.push(input.path); return read(input); };
+    f.runtime.writeTextFile = async input => { writes.push(input.path); return write(input); };
+    const { packets } = await f.prepare(f.headSha, {axes:["engineering-quality", "claim-and-specification", "test-against-spec", "test-health"]});
+    expect(packets).toHaveLength(8);
+    for (const packet of packets) {
+      expect(packet.patches.map(patch => patch.path)).toEqual(packet.unit.paths);
+      expect(packet.patches[0]!.content).toContain("= 0;");
+      expect(packet.patches[0]!.content).toContain("= 1;");
+    }
+    // Every signed raw patch is already persisted by common preparation. Its
+    // immutable contents need one authenticated read, and no per-specialist copy.
+    expect(reads.filter(path => /\/patch-[a-f0-9]+\.diff$/.test(path))).toHaveLength(2);
+    expect(writes.filter(path => path.endsWith(".patch"))).toHaveLength(0);
+  } finally { await f.cleanup(); }
+});
+
+test("shared delta patches remain distinct from both the full diff and other historical heads", async () => {
+  const f = await fixture();
+  try {
+    const axes: ReviewAxis[] = ["engineering-quality", "test-against-spec", "test-health"];
+    const first = await f.prepare(f.headSha, {axes});
+    // Technical and independent specification assessments share a prior head.
+    for (const packet of first.packets.filter(packet => packet.unit.axis !== "test-health")) await f.save(f.assessment(packet));
+    const middleHead = await f.commit({"src/a/index.ts":"export const a = 2;\n"});
+    const middle = await f.prepare(middleHead, {axes});
+    for (const packet of middle.packets.filter(packet => packet.unit.axis === "test-health")) await f.save(f.assessment(packet));
+    const nextHead = await f.commit({"src/a/index.ts":"export const a = 3;\n"});
+    const commands: string[] = [], writes: string[] = [];
+    const run = f.runtime.run, write = f.runtime.writeTextFile;
+    f.runtime.run = async input => { commands.push(input.command); return run(input); };
+    f.runtime.writeTextFile = async input => { writes.push(input.path); return write(input); };
+    const { packets } = await f.prepare(nextHead, {axes});
+    for (const packet of packets.filter(packet => packet.unit.component === "src/a")) {
+      const expectedOldValue = packet.unit.axis === "test-health" ? 2 : 1;
+      expect(packet.patches[0]!.content).toContain(`-export const a = ${expectedOldValue};`);
+      expect(packet.patches[0]!.content).toContain("+export const a = 3;");
+      expect(packet.patches[0]!.fromHead).toBe(expectedOldValue === 2 ? middleHead : f.headSha);
+    }
+    expect(commands.filter(command => command.includes("--batch-check="))).toHaveLength(2);
+    expect(commands.filter(command => command.includes("--no-textconv --full-index"))).toHaveLength(4);
+    expect(writes.filter(path => path.endsWith(".patch"))).toHaveLength(4);
+  } finally { await f.cleanup(); }
+});
 
 test("a new head reuses completed independent work before any published baseline exists",async()=>{
   const f = await fixture();
