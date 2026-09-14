@@ -93,6 +93,8 @@ test("seeded defect and corrected control are independently verified without exp
   }
 });
 
+// Real Git checkouts and Node probes span the initial review, publication
+// recovery, presentation change, and fixing revision, including on shared CI.
 test("official mock transport exercises production initial-plus-fix review, probes, persistence, assembly and thread resolution", async () => {
   const control = await createQualityControlRepository();
   const workspaces = new Map<string, QualityWorkspace>();
@@ -642,4 +644,4 @@ test("official mock transport exercises production initial-plus-fix review, prob
       roots.map((root) => rm(root, { recursive: true, force: true })),
     );
   }
-});
+}, 30_000);
