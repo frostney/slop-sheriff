@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { landingPage } from "../src/landing/page";
 import { landingPaths, landingResponse } from "../src/landing/routes";
 
-const canonicalOrigin = "https://slop-sheriff.vercel.app";
+const canonicalOrigin = "https://slop-sheriff.dev";
 
 function request(path: string, method = "GET"): Request {
   return new Request(`${canonicalOrigin}${path}`, {
@@ -33,6 +33,13 @@ describe("public landing routes", () => {
     expect(robots).toContain(`Sitemap: ${canonicalOrigin}/sitemap.xml`);
     expect(robots).toContain("Disallow: /eve/");
     expect(await landingResponse(request("/sitemap.xml"), "production").text()).toContain(`<loc>${canonicalOrigin}/</loc>`);
+    const llms = await landingResponse(request("/llms.txt"), "production").text();
+    expect(landingResponse(request("/llms.txt"), "production").headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(llms).toContain("# Slop Sheriff");
+    expect(llms).toContain(`Canonical: ${canonicalOrigin}`);
+    expect(llms).toContain("https://github.com/frostney/slop-sheriff");
+    // Sitemap stays homepage-only; llms.txt is agent discovery, not a sitemap URL.
+    expect(await landingResponse(request("/sitemap.xml"), "production").text()).not.toContain("/llms.txt");
   });
 
   test("setup links resolve against a validated deployment revision", () => {
@@ -58,7 +65,7 @@ describe("public landing routes", () => {
   });
 
   test("production aliases stay noindex and forwarded hosts cannot grant indexing", async () => {
-    for (const hostname of ["known-good-review.vercel.app", "candidate.vercel.app", "127.0.0.1", "slop-sheriff.vercel.app.attacker.example"]) {
+    for (const hostname of ["known-good-review.vercel.app", "candidate.vercel.app", "127.0.0.1", "slop-sheriff.vercel.app", "slop-sheriff.vercel.app.attacker.example"]) {
       const response = landingResponse(new Request(`https://${hostname}/`, {
         headers: { "x-forwarded-host": "slop-sheriff.vercel.app" },
       }), "production");

@@ -1,7 +1,26 @@
-export const siteOrigin = "https://slop-sheriff.vercel.app";
+export const siteOrigin = "https://slop-sheriff.dev";
 export const repositoryUrl = "https://github.com/frostney/slop-sheriff";
 
 const description = "Meet Slop Sheriff, a cowboy GitHub code reviewer. Focused review lanes, concise findings, and evidence you can inspect. Deploy it on your own infrastructure.";
+
+export function llmsTxt(): string {
+  return `# Slop Sheriff
+
+> Meet Slop Sheriff, a cowboy GitHub code reviewer. Focused review lanes, concise findings, and evidence you can inspect. Deploy it on your own infrastructure.
+
+- Canonical: ${siteOrigin}
+- GitHub: ${repositoryUrl}
+
+## What it does
+
+Slop Sheriff reviews pull requests with focused specialist lanes, then reconciles findings into one report. Impact summaries stay short; evidence stays inspectable. You self-host it with your own GitHub connection, model access, and infrastructure.
+
+## What this is not
+
+This is a self-hosted GitHub code reviewer. It is not a hosted SaaS, a merge bot, or a claim about whether a person or an AI wrote the code.
+`;
+}
+
 
 export function landingPage(indexable: boolean, sourceRevision?: string): string {
   const revision = sourceRevision && /^[a-f0-9]{40}$/i.test(sourceRevision) ? sourceRevision : "main";
