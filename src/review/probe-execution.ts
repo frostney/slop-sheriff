@@ -4,6 +4,7 @@ import { z } from "zod";
 import { evidenceWriteScope } from "./evidence-write-scope";
 import type { TextSandbox } from "./authenticated-evidence";
 import { artifactRequest } from "./durable-evidence";
+import { probeExecutionIdSchema } from "./execution-reference";
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const environmentEntrySchema = z.strictObject({
@@ -23,7 +24,7 @@ export const runReviewProbeInputSchema = z.strictObject({
 export type ReviewProbeInput = z.infer<typeof runReviewProbeInputSchema>;
 
 export const readReviewProbeInputSchema = z.strictObject({
-  probeId: digestSchema, executionId: z.string().uuid(),
+  probeId: digestSchema, executionId: probeExecutionIdSchema,
   stream: z.enum(["stdout", "stderr"]), cursor: z.number().int().nonnegative().nullable(),
 });
 

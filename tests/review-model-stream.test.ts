@@ -12,6 +12,9 @@ import { ToolInputJsonPrefix } from "../src/models/tool-input-stream";
 import { completeReviewWorkInput } from "./fixtures/review-work-contract";
 import { reviewWorkCheckpoint } from "../src/review/work-execution";
 import { laneCheckpointContentSchema } from "../src/review/lane-checkpoint";
+import { serializeInputSchema, toInputSchema } from "../node_modules/eve/dist/src/tools/schema.js";
+
+const compiledWorkSchema = toInputSchema(serializeInputSchema(reviewWorkInputSchema));
 
 const scope: CostExecutionScope = { repositoryId: "fixture", repository: "fixture/contract", pullRequest: 43,
   headSha: "578235f", attemptId: "offline-contract", reviewKind: "full", sessionId: "child", turnId: "turn", stepIndex: 0, phase: "claim-and-specification" };
@@ -54,8 +57,9 @@ test.each(["mock", "gateway"] as const)("current-format streamed completion and 
         }), { headers: { "content-type": "text/event-stream" } }), { preconnect: () => {} }) })("fixture/model");
       let executions = 0;
       const result = streamText({ model: withTaskReasoning(model, "medium"), prompt: "Offline streamed report", maxRetries: 0, tools: {
-        review_work: { inputSchema: reviewWorkInputSchema, execute: async parsed => {
+        review_work: { inputSchema: compiledWorkSchema, execute: async input => {
           executions++;
+          const parsed = reviewWorkInputSchema.parse(input);
           if (parsed.action.operation === "read") throw new Error("Unexpected read");
           return laneCheckpointContentSchema.parse(reviewWorkCheckpoint(parsed.action).checkpoint);
         } },
@@ -100,12 +104,12 @@ test.each([
   }, { preconnect: () => {} }) })("fixture/model");
   const errors: unknown[] = [];
   const result = streamText({ model: withTaskReasoning(provider, "medium"), prompt: "Replay the captured prefix", maxRetries: 0,
-    tools: { review_work: { inputSchema: reviewWorkInputSchema, execute: async () => { executed = true; return "must not persist"; } } },
+    tools: { review_work: { inputSchema: compiledWorkSchema, execute: async () => { executed = true; return "must not persist"; } } },
     telemetry: { isEnabled: true, integrations: [createCostTelemetry({ scope: () => scope, record: async row => { rows.push(row); } })] },
     onError: ({ error }) => { errors.push(error); },
   });
   await result.consumeStream({ onError: error => { errors.push(error); } });
-  expect(requestTools).toEqual([expect.objectContaining({ name: "review_work", strict: true, inputSchema: await asSchema(reviewWorkInputSchema).jsonSchema })]);
+  expect(requestTools).toEqual([expect.objectContaining({ name: "review_work", strict: true, inputSchema: await asSchema(compiledWorkSchema).jsonSchema })]);
   expect(errors.map(String).join(" ")).toContain("Invalid streamed tool JSON");
   expect(cancelled).toBe(true);
   expect(executed).toBe(false);

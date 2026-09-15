@@ -1,5 +1,6 @@
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 import { routingEnvelope } from "../../../../../src/models/routing";
+import { assertStrictToolSchema } from "../../../strict-tool-schema";
 
 export function capabilityProbeResponse(request: MockModelRequest): MockModelResponse | string | null {
   const prompt = request.userMessages.join("\n");
@@ -9,6 +10,11 @@ export function capabilityProbeResponse(request: MockModelRequest): MockModelRes
     const forbidden = ["bash", "read_file", "write_file", "glob", "grep", "web_fetch", "load_skill", "read_review_evidence", "fixture_dynamic", "agent", "task_cancel"];
     const expected = ["inspect_review_source", "run_review_probe", "read_review_probe", "fetch_review_reference", "inspect_review_image", "review_work"];
     if (forbidden.some(name => names.includes(name)) || expected.some(name => !names.includes(name))) throw new Error(`Unexpected assigned work capabilities: ${JSON.stringify(names)}`);
+    // One native-build guard checks the actual resolved request. The variant
+    // matrices remain in bun test, using the same strict-subset assertions.
+    for (const tool of request.tools.filter(tool => ["review_work", "inspect_review_source"].includes(tool.name))) {
+      assertStrictToolSchema(tool.inputSchema, tool.name);
+    }
     // Replay the two failure shapes through Eve's compiled tool boundary. They
     // must return validation errors to this same child before sandbox execution.
     const source = request.toolResults.find(result => result.name === "inspect_review_source");

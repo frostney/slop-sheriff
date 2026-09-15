@@ -13,6 +13,11 @@ import { reviewTool as sourceTool } from "../agent/tools/inspect_review_source";
 import probeTool from "../agent/tools/run_review_probe";
 import probeOutputTool from "../agent/tools/read_review_probe";
 import { completeReviewWorkInput } from "./fixtures/review-work-contract";
+import { probeExecutionIdSchema } from "../src/review/execution-reference";
+import { assertStrictToolSchema } from "./fixtures/strict-tool-schema";
+import { createGateway } from "@ai-sdk/gateway";
+import { replayDynamicTools } from "../node_modules/eve/dist/src/context/build-dynamic-tools.js";
+import { buildToolSetFromDefinitions } from "../node_modules/eve/dist/src/harness/tools.js";
 
 const report = {
   axis: "engineering-quality", scope: { claim: "Validate input", dirtyState: "Frozen head", inspectedSupportingContext: [] },
@@ -60,8 +65,8 @@ test("review report and source tools request strict provider enforcement at the 
 });
 
 test("every work operation has matching wire and runtime structure and maps to the persisted contract", async () => {
-  const wire = z.fromJSONSchema(await asSchema(reviewWorkInputSchema).jsonSchema);
   const compiled = toInputSchema(serializeInputSchema(reviewWorkInputSchema));
+  const wire = z.fromJSONSchema(await asSchema(compiled).jsonSchema);
   const progress = { action: { operation: "progress", reviewedEntries: [], remainingEntries: [0], observations: [], nextSteps: ["Run the boundary probe"], limitations: [], escalation: null } };
   const valid = [{ action: { operation: "read" } }, progress, completeWorkInput];
   for (const input of valid) {
@@ -91,8 +96,8 @@ test("every work operation has matching wire and runtime structure and maps to t
 });
 
 test("source operation and path matrices agree before any repository command runs", async () => {
-  const wire = z.fromJSONSchema(await asSchema(inspectReviewSourceInputSchema).jsonSchema);
   const compiled = toInputSchema(serializeInputSchema(inspectReviewSourceInputSchema));
+  const wire = z.fromJSONSchema(await asSchema(compiled).jsonSchema);
   for (const revision of ["base", "head"] as const) {
     for (const target of [{ operation: "read", path: "src/index.ts" }, { operation: "search", query: "input" }]) {
       const input = { revision, target, cursor: null };
@@ -117,23 +122,63 @@ test("source operation and path matrices agree before any repository command run
 });
 
 test("strict schemas are object roots with required fields, closed objects and supported nested alternatives", async () => {
-  function inspect(node: unknown): void {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) { node.forEach(inspect); return; }
-    const value = node as Record<string, unknown>;
-    expect(value).not.toHaveProperty("oneOf");
-    if (value.type === "object") {
-      expect(value.additionalProperties).toBe(false);
-      expect([...(value.required as string[] ?? [])].sort()).toEqual(Object.keys(value.properties as object ?? {}).sort());
-    }
-    Object.values(value).forEach(inspect);
-  }
-  for (const schema of [reviewWorkInputSchema, inspectReviewSourceInputSchema]) {
+  for (const [name, { inputSchema: schema }] of Object.entries(qualityWorkTools)) {
     const wire = await asSchema<unknown>(schema).jsonSchema;
-    expect(wire.type).toBe("object");
-    expect(wire).not.toHaveProperty("anyOf");
-    inspect(wire);
-    inspect(serializeInputSchema(schema));
+    assertStrictToolSchema(wire, name);
+    assertStrictToolSchema(serializeInputSchema(schema), name);
+    assertStrictToolSchema(await asSchema(toInputSchema(serializeInputSchema(schema))).jsonSchema, name);
+  }
+  const model = new MockLanguageModelV4({ doGenerate: async () => ({ content: [], warnings: [], finishReason: { unified: "stop", raw: "stop" }, usage: { inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 0, text: 0, reasoning: 0 } } }) });
+  await generateText({ model: withTaskReasoning(model, "medium"), prompt: "Inspect the hosted tool contracts", tools:
+    Object.fromEntries(Object.entries(qualityWorkTools).map(([name, definition]) => [name,
+      tool({ ...definition, inputSchema: toInputSchema(serializeInputSchema(definition.inputSchema)) }),
+    ])),
+  });
+  const delivered = model.doGenerateCalls[0]!.tools!;
+  expect(delivered).toHaveLength(Object.keys(qualityWorkTools).length);
+  for (const definition of delivered) if (definition.type === "function") assertStrictToolSchema(definition.inputSchema, definition.name);
+});
+
+test("Eve's durable tool replay and harness deliver the audited contracts to Gateway", async () => {
+  const metadata = Object.entries(qualityWorkTools).map(([name, definition]) => ({ name, description: definition.description,
+    inputSchema: serializeInputSchema(definition.inputSchema)!, resolverSlug: name, entryKey: "default", callbacks: { execute: { closure: {} } } }));
+  const tools = buildToolSetFromDefinitions({ tools: replayDynamicTools(metadata, { sessionId: "offline-schema", scope: "step" }) });
+  let requests = 0;
+  const provider = createGateway({ apiKey: "offline-fixture", fetch: Object.assign(async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests++;
+    const body = JSON.parse(String(init?.body));
+    expect(body.tools.map((entry: { name: string }) => entry.name).sort()).toEqual(Object.keys(qualityWorkTools).sort());
+    for (const definition of body.tools) {
+      assertStrictToolSchema(definition.inputSchema, definition.name);
+      if (["review_work", "inspect_review_source"].includes(definition.name)) expect(definition.strict).toBe(true);
+      expect(definition.inputSchema).toEqual(asSchema(tools[definition.name]!.inputSchema).jsonSchema);
+    }
+    return Response.json({ content: [{ type: "text", text: "contract inspected" }], finishReason: { unified: "stop", raw: "stop" },
+      usage: { inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 0, text: 0, reasoning: 0 } } });
+  }, { preconnect: () => {} }) })("fixture/model");
+  const result = await generateText({ model: withTaskReasoning(provider, "medium"), prompt: "Inspect the final request", tools, maxRetries: 0 });
+  expect(result.text).toBe("contract inspected");
+  expect(requests).toBe(1);
+});
+
+test("UUID evidence IDs retain their accepted values after Eve and SDK schema reconstruction", async () => {
+  const idInputs = ["550e8400-e29b-41d4-a716-446655440000", "550E8400-E29B-41D4-A716-446655440000",
+    "00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    "550e8400-e29b-01d4-a716-446655440000", "550e8400-e29b-41d4-7716-446655440000",
+    "550e8400e29b41d4a716446655440000", "../escape", "", null, 42];
+  for (const id of idInputs) {
+    const expected = z.string().uuid().safeParse(id).success;
+    expect(probeExecutionIdSchema.safeParse(id).success).toBe(expected);
+    for (const [schema, input] of [
+      [reviewWorkInputSchema, { action: { ...completeWorkInput.action, report: { ...report,
+        candidates: [{ ...report.candidates[0], evidenceRefs: [{ kind: "probe", id }] }] } } }],
+      [probeOutputTool.inputSchema, { probeId: "a".repeat(64), executionId: id, stream: "stdout", cursor: null }],
+    ] as const) {
+      const compiled = toInputSchema(serializeInputSchema(schema));
+      const wire = z.fromJSONSchema(await asSchema(compiled).jsonSchema);
+      expect(wire.safeParse(input).success).toBe(expected);
+      expect((await compiled["~standard"].validate(input)).issues === undefined).toBe(expected);
+    }
   }
 });
 
