@@ -34,17 +34,22 @@ Link the local checkout with `bun x vercel link`, selecting that existing projec
 Use `bun x convex dev` to create and configure your own Convex project and generate
 its bindings. Stop the development watcher when setup is complete.
 
-In Vercel's project settings, set the production build command to:
+Repository `vercel.json` sets the production Build Command to:
 
 ```sh
-bunx convex deploy --cmd 'bunx eve build'
+bunx eve build
 ```
 
-Add the production Convex deploy key as `CONVEX_DEPLOY_KEY` in Vercel's production
-build environment. Configure previews with a separate Convex preview deployment;
-do not point routine preview builds at your production backend. The hosted build
-must permit Eve to prewarm its Vercel Sandbox template. The local `bun run build`
-intentionally skips this paid infrastructure step.
+That publishes the public landing (including `/llms.txt`) without requiring a
+Convex push on every Git deploy. Add the production Convex deploy key as
+`CONVEX_DEPLOY_KEY` in Vercel's production build environment with both
+`deployment:deploy` and `deployment:data:view`, then either run
+`bunx convex deploy` when the schema changes or restore
+`bunx convex deploy --cmd 'bunx eve build'` in `vercel.json`. Configure previews
+with a separate Convex preview deployment; do not point routine preview builds
+at your production backend. The hosted build must permit Eve to prewarm its
+Vercel Sandbox template. The local `bun run build` intentionally skips this paid
+infrastructure step.
 
 Enable AI Gateway for your Vercel team and choose supported models with tool use.
 The Vercel runtime uses OIDC for Gateway access. Convex runs outside Vercel and

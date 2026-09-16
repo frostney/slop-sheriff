@@ -14,8 +14,15 @@ four recorded finding transitions; it does not prove current model quality.
 
 The local build skips sandbox prewarming. Production must run `bunx eve build`
 without `--skip-sandbox-prewarm`, with permission to create sandbox templates.
-The current combined build is `bunx convex deploy --cmd 'bunx eve build'`.
-Use a separate Convex deployment for ordinary previews.
+
+`vercel.json` sets the production Build Command to `bunx eve build` so a Vercel
+Git deploy can publish the Eve/Nitro output when the production
+`CONVEX_DEPLOY_KEY` lacks `deployment:data:view` (Convex CLI 1.45 refuses the
+push without it). Restore the combined command
+`bunx convex deploy --cmd 'bunx eve build'` in `vercel.json` once the deploy key
+grants both `deployment:deploy` and `deployment:data:view`, or run
+`bunx convex deploy` separately when the Convex schema changes. Use a separate
+Convex deployment for ordinary previews.
 
 The Slop Sheriff release adds allowed review-axis values to the existing Convex
 schema. It does not repeat the earlier staged-memory migration. The app-first
