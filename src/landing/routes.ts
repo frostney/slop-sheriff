@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import bundledAssets from "./assets.json";
-import { landingPage, siteOrigin } from "./page";
+import { landingPage, llmsTxt, siteOrigin } from "./page";
 
 function imageAsset(type: string, base64: string) {
   const bytes = Buffer.from(base64, "base64");
@@ -14,7 +14,7 @@ const assets = new Map([
   ["/assets/slop-sheriff-social.jpg", imageAsset("image/jpeg", bundledAssets["slop-sheriff-social.jpg"])],
 ]);
 
-export const landingPaths = ["/", "/robots.txt", "/sitemap.xml", ...assets.keys()];
+export const landingPaths = ["/", "/robots.txt", "/sitemap.xml", "/llms.txt", ...assets.keys()];
 
 export function landingResponse(request: Request, environment = process.env.VERCEL_ENV): Response {
   const url = new URL(request.url);
@@ -43,6 +43,9 @@ export function landingResponse(request: Request, environment = process.env.VERC
   } else if (pathname === "/sitemap.xml") {
     headers.set("content-type", "application/xml; charset=utf-8");
     body = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${indexable ? `<url><loc>${siteOrigin}/</loc></url>` : ""}</urlset>`;
+  } else if (pathname === "/llms.txt") {
+    headers.set("content-type", "text/plain; charset=utf-8");
+    body = llmsTxt();
   } else {
     const asset = assets.get(pathname);
     if (!asset) return new Response(null, { status: 404, headers });
