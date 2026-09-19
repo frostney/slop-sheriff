@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reviewAxes } from "../review/axes";
+import { reviewAxisSchema } from "../review/axes";
 
 export const vectorDimensions = [
   128, 256, 512, 768, 1024, 1408, 1536, 2048, 3072, 4096,
@@ -59,7 +59,7 @@ export const memoryIngestionSchema = z.object({
 
 export const memorySearchRequestSchema = z.object({
   repositoryId: z.string().min(1),
-  axis: z.enum(reviewAxes),
+  axis: reviewAxisSchema,
   query: z.string().min(1).max(20_000),
   embedding: embeddingConfigSchema,
   limit: z.number().int().min(1).max(20).default(8),

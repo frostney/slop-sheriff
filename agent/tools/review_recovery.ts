@@ -1,3 +1,4 @@
+import { outsideReviewWork } from "../lib/review-capabilities";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
@@ -35,7 +36,7 @@ export const reviewRecoveryInputSchema = z
     }
   });
 
-export default defineTool({
+export const reviewTool = defineTool({
   description:
     "Read the trusted review recovery packet or verify axes-complete against every exact lane checkpoint. Use null stage for reads. Revalidation and report tools own later stage transitions.",
   inputSchema: reviewRecoveryInputSchema,
@@ -82,3 +83,5 @@ export default defineTool({
     return toolOutput.json(output);
   },
 });
+
+export default outsideReviewWork(reviewTool);

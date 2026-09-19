@@ -10,7 +10,7 @@ export interface PatchFile {
   readonly deletions?: number;
 }
 
-function hasCompletePatch(file: PatchFile): boolean {
+export function hasCompletePatch(file: PatchFile): boolean {
   if (file.patch === null || file.additions === undefined || file.deletions === undefined) return false;
   let additions = 0;
   let deletions = 0;

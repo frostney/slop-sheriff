@@ -16,6 +16,8 @@ import {
 } from "./review-state";
 
 export const pullRequestDetailsSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().nullable().optional(),
   number: z.number().int().positive(),
   draft: z.boolean(),
   state: z.string(),
@@ -103,6 +105,7 @@ export function planDispatch(input: {
   readonly draft: boolean;
   readonly head: string;
   readonly manualFull?: boolean;
+  readonly reviewPolicyDigest?: string;
   readonly manualFullAuthorized?: boolean;
   readonly patchFiles?: readonly PatchFile[];
   readonly state:
@@ -122,12 +125,10 @@ export function planDispatch(input: {
               patchFingerprint:
                 input.state.state.baseline.patchFingerprint,
             }
-          : input.state.state.initialFullStatus === "failed"
-            ? { kind: "lost" }
-            : {
+          : {
                 kind: "none",
                 initial:
-                  input.state.state.initialFullStatus === "running"
+                  input.state.state.initialFullStatus === "running" || input.state.state.initialFullStatus === "failed"
                     ? "running"
                     : input.state.state.initialFullStatus === "debouncing"
                       ? "debouncing"

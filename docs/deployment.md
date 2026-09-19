@@ -15,17 +15,20 @@ four recorded finding transitions; it does not prove current model quality.
 The local build skips sandbox prewarming. Production must run `bunx eve build`
 without `--skip-sandbox-prewarm`, with permission to create sandbox templates.
 
-`vercel.json` sets the production Build Command to `bunx eve build` so a Vercel
-Git deploy can publish the Eve/Nitro output when the production
+`vercel.json` runs `bunx eve build` on production (full sandbox prewarm) and
+`bunx eve build --skip-sandbox-prewarm` on non-production Preview builds so
+Preview CI is not blocked when Sandbox template create/lookup auth fails.
+Production Git deploys still publish Eve/Nitro output when the production
 `CONVEX_DEPLOY_KEY` lacks `deployment:data:view` (Convex CLI 1.45 refuses the
 push without it). Restore the combined command
 `bunx convex deploy --cmd 'bunx eve build'` in `vercel.json` once the deploy key
 grants both `deployment:deploy` and `deployment:data:view`, or run
 `bunx convex deploy` separately when the Convex schema changes. Use a separate
-Convex deployment for ordinary previews.
+Convex deployment for ordinary previews. First production deploy of a tip that
+needs a new sandbox template still requires working Sandbox API auth.
 
-The Slop Sheriff release adds allowed review-axis values to the existing Convex
-schema. It does not repeat the earlier staged-memory migration. The app-first
+This release adds durable lifecycle, artifact and cost ledgers alongside the
+existing Convex memory schema. It does not repeat the earlier staged-memory migration. The app-first
 migration and drain procedure from PR36 is historical; consult that revision
 only when changing those incompatible contracts again.
 
@@ -73,30 +76,51 @@ the authenticated Eve surface, and Connect routing. Public landing assets must
 not expose sessions or create model work. Preview and local pages remain
 `noindex`; only the canonical production hostname is indexable.
 
-## One advisory self-review pilot
+## Supervised self-review validation
 
-The approved launch pilot extends PR42 and deploys its validated candidate
-before merging. There is no merge authorization. After exact-head CI and
-production validation pass, make PR42 ready once. That transition is the single
-paid trigger; do not also post a manual full-review command.
+Deploy the repaired candidate before pushing the pull-request branch. A push to
+an open, ready PR is already a review trigger. Do not also post a full-review
+command unless inspection proves that no current review was admitted, or an
+explicit full review is needed. Do not toggle draft state to manage production
+reviews. Newer commits supersede obsolete work through the review lifecycle.
 
-Freeze the head and deployments while the review runs. Confirm the repository
-is included in the existing App installation and trusted-base policy remains
-advisory. Observe completion, exact-head publication, all required lane coverage,
-canonical finding identities, duplicate and false-positive control, impact
-summaries, and expandable detail. Failure or missing coverage is not completion.
-Return PR42 to draft after the terminal result before pushing any follow-up fix.
-Assess the result before enabling ongoing automatic self-review.
+The initial PR42 pilot was advisory. The current PR43 reliability validation
+covers a full review followed by a delta, valid finding fixes, thread
+reconciliation and billing. It does not authorize merging or changing payment
+settings. Verify the existing Gateway credential is available before a paid
+canary; account credit and a key's own availability are separate prerequisites.
+A rejected credential is an operational interruption, never a completed review.
+
+`REVIEW_EXECUTION_CAPACITY` sets concurrent review roots, defaulting to four.
+The queue rotates across repositories. This controls execution concurrency and
+does not truncate investigation or impose a spending limit.
+
+Account credit recovery is checked without model calls. Key-budget failures
+require key-specific evidence: account balance alone is insufficient. Current
+automatic recovery recognizes a changed credential with successful authenticated
+metadata access. A same-key scheduled reset must be verified by the operator
+before an explicit retrigger; it is not yet detected automatically.
+
+Observe exact-head publication, all required lane coverage, canonical finding
+identities, duplicate and false-positive control, concise inline comments, and
+verified thread resolution. Failure or missing required verification is not
+completion. A green aggregate Check alone does not establish finding quality.
+Inspect the actual comments and all finding dispositions.
 
 Record start/end times, head and base SHAs, deployment IDs, provider versions,
 requested/resolved models, phase latency, input/output/cache tokens, Gateway
-cost, and unresolved accounting. Deduplicate model-call identities and preserve
-cache-inclusive SDK totals separately from Gateway-native usage. Keep secrets,
-raw credentials, and private prompt contents out of the evidence record.
+cost, and unresolved accounting. Keep attempt totals, full-plus-delta lifecycle
+totals and API-key cumulative spend separate. Include failed provider attempts
+and compaction. Deduplicate model-call identities and preserve cache-inclusive
+SDK totals separately from Gateway-native usage. Keep credentials and private
+prompt contents out of the evidence record.
 
-One pilot measures that run. It does not establish performance or quality parity,
-or justify another paid run without authorization. A deterministic mismatch
-must be reproduced and fixed offline before another live attempt.
+The next rollout stage is 30+ repositories. Validate a representative burst,
+overlapping pushes and injected failures offline before deployment, then assess
+observed review quality and actual full-plus-delta costs before expanding.
+There are no arbitrary spending, token, time or diff-size acceptance caps.
+Any deterministic mismatch must be reproduced and fixed offline before another
+paid attempt; a canary validates the release rather than discovering contracts.
 
 ## Recovery
 
@@ -106,3 +130,13 @@ readers or validators. Preserve signed evidence, revocation records, and review
 state. A failed deployment should leave the prior production candidate serving;
 verify provider state rather than assuming rollback succeeded. Repair forward
 when compatibility cannot be established.
+
+## Public domain
+
+The canonical public address is `https://slop-sheriff.dev`. `www.slop-sheriff.dev` permanently redirects to that address. The existing Vercel
+project owns the domain, and GitHub's repository and App homepages point there.
+`src/landing/page.ts` supplies the shared origin for canonical, social-image and
+sitemap URLs. Only that exact hostname on a production deployment is indexable.
+The previous Vercel hostname remains an operational alias with noindex, allowing
+existing links and integration routes to keep working during migration. Connect
+callback and webhook URLs remain provider-managed endpoints.

@@ -2,11 +2,12 @@ import type { ReviewAxis } from "./axes";
 import { writingQualityApplies } from "./axes";
 
 export function isSpecialistAxis(axis: ReviewAxis): boolean {
-  return axis === "test-against-spec" || axis === "writing-quality" || axis === "test-health";
+  return axis.startsWith("project-") || axis === "test-against-spec" || axis === "writing-quality" || axis === "test-health";
 }
 
 /** Patch selection narrows delivery, never the manifest or permission to inspect supporting evidence. */
 export function specialistEntryScope(axis: ReviewAxis, path: string) {
+  if (axis.startsWith("project-")) return { includePatch: true, obligation: "Verify the trusted project lane criteria against this entry and its prepared reference sources. Record independent evidence for each applicable requirement; unresolved required verification cannot complete.", reason: "Trusted project lane criteria retain complete source scope" };
   if (axis === "test-health") {
     const includePatch = /(?:^|\/)(?:tests?|__tests__|specs?|fixtures?|contracts?|requirements?|specifications?|adr)(?:\/|\.)|\.(?:test|spec)\.|\.(?:mdx?|rst|adoc|feature)$/i.test(path);
     return {

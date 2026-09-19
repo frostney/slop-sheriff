@@ -1,8 +1,12 @@
+import { reviewLaneRegistry } from "../../src/review/project-lanes";
+import { projectLaneRegistryDigest } from "../../src/review/project-lane-identity";
+import { reviewConfigFromAuth, validateConfiguredAxes } from "../../src/config/trusted-review-config";
 import { defineState, type SessionAuthContext } from "eve/context";
 import { z } from "zod";
 import {
   beginReportAssembly,
   reportAssemblyIdentitySchema,
+  reviewAxisDecisionsSchema,
   validateReportAssemblyIdentity,
   type ReportAssemblyIdentity,
   type ReportAssemblyState,
@@ -11,12 +15,13 @@ import {
   reviewContextAttributes,
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
-import { reviewAxes } from "../../src/review/axes";
+import { reviewAxisSchema, maxReviewLanes } from "../../src/review/axes";
 import { reviewFileScopeSchema } from "../../src/review/prepare-review-evidence";
 
 const reportPlanSchema = z.object({
   kind: z.enum(["full", "delta"]),
-  activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
+  activeAxes: z.array(reviewAxisSchema).min(1).max(maxReviewLanes),
+  axisDecisions: reviewAxisDecisionsSchema.optional(),
   selectedFindingIds: z.array(z.string().regex(/^CR-[1-9]\d*$/)).max(100),
   baselineHead: z.string().nullable(),
 });
@@ -38,6 +43,12 @@ export function reportAssemblyIdentityFromAuth(
     throw new Error("Trusted review report is missing its plan");
   }
   const plan = reportPlanSchema.parse(JSON.parse(rawPlan));
+  const config = reviewConfigFromAuth(auth);
+  validateConfiguredAxes(plan.activeAxes, config);
+  if (plan.axisDecisions) {
+    const registry = reviewLaneRegistry(config);
+    if (plan.axisDecisions.length !== registry.length || registry.some((lane) => !plan.axisDecisions?.some((decision) => decision.axis === lane.id))) throw new Error("Review decisions do not match the trusted lane registry");
+  }
   const rawFiles = auth?.attributes[reviewContextAttributes.reviewFiles];
   if (typeof rawFiles !== "string") throw new Error("Trusted review report is missing its file scope");
   const reviewPaths = reviewFileScopeSchema.parse(JSON.parse(rawFiles)).map((file) => file.path);
@@ -48,10 +59,13 @@ export function reportAssemblyIdentityFromAuth(
     baseSha: trusted.baseSha,
     headSha: trusted.headSha,
     patchFingerprint: trusted.patchFingerprint,
+    laneRegistryDigest: projectLaneRegistryDigest(reviewConfigFromAuth(auth)),
+    reviewPolicyDigest: trusted.reviewPolicyDigest,
     planKind: plan.kind,
     baselineHead: plan.baselineHead,
     reviewPaths,
     activeAxes: plan.activeAxes,
+    ...(plan.axisDecisions ? { axisDecisions: plan.axisDecisions } : {}),
     selectedFindingIds: plan.selectedFindingIds,
   });
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reviewAxes } from "./axes";
+import { reviewAxisSchema } from "./axes";
 
 export const repositoryRelativePathSchema = z
   .string()
@@ -35,12 +35,27 @@ export const reviewFindingEvidenceSchema = z
     impactSummary: findingImpactSummarySchema.optional(),
     remedy: z.string().min(1),
     staticOnly: z.boolean(),
+    introduction: z.string().optional(),
+    principle: z.string().optional(),
+    risk: z.string().optional(),
   });
+
+export const findingProseSchema = z.string().min(1).regex(/^[^\u2014]*$/, "Review prose must not use em dashes");
+export const additionalConcernSchema = z.strictObject({
+  title: findingProseSchema.max(160),
+  location: findingLocationSchema,
+  consequence: findingProseSchema.max(500),
+  recommendedChange: findingProseSchema.max(500),
+});
 
 const findingDraftBaseShape = {
   severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
   ...reviewFindingEvidenceSchema.shape,
   impactSummary: findingImpactSummarySchema,
+  requirementIds: z.array(z.string().regex(/^req-[a-f0-9]{24}$/)).max(100).describe("Affected prepared requirement source IDs, empty when no explicit requirement is implicated."),
+  introduction: findingProseSchema.describe("25 to 45 words explaining the issue in the configured voice. Keep technical terms exact."),
+  principle: findingProseSchema.describe("The applicable requirement or engineering principle grounded in this change; cite its source when useful."),
+  risk: findingProseSchema.max(300).describe("One plain sentence explaining trigger, reach, and material uncertainty."),
 };
 
 const claimFindingDraftSchema = z
@@ -78,6 +93,12 @@ export const reviewFindingDraftSchema = z.discriminatedUnion("category", [
 const canonicalFindingShape = {
   id: z.string().regex(/^CR-[1-9]\d*$/),
   status: z.enum(["open", "fixed", "deferred"]),
+  requirementIds: z.array(z.string().regex(/^req-[a-f0-9]{24}$/)).max(100).optional(),
+  dismissal: z.strictObject({ reason: z.string().min(1), actor: z.string().min(1), head: z.string().regex(/^[a-f0-9]{40}$/), commentId: z.string().min(1) }).optional(),
+  introduction: findingProseSchema.optional(),
+  principle: findingProseSchema.optional(),
+  risk: findingProseSchema.max(300).optional(),
+  resolutionSummary: findingProseSchema.max(200).optional().describe("Short actual fix, in the configured voice. The application appends the verified commit."),
   // Reports and revalidation can carry findings recorded before summaries existed.
   impactSummary: findingImpactSummarySchema.optional(),
 };
@@ -106,7 +127,7 @@ export const reviewReportSchema = z
       dirtyState: z.string(),
     }),
     coverage: z.object({
-      activeAxes: z.array(z.enum(reviewAxes)),
+      activeAxes: z.array(reviewAxisSchema),
       skippedAxes: z.array(
         z.object({ name: z.string(), reason: z.string().min(1) }),
       ),
@@ -122,6 +143,8 @@ export const reviewReportSchema = z
       z.object({ commandOrAction: z.string(), result: z.string() }),
     ),
     findings: z.array(reviewFindingSchema),
+    actionSummary: findingProseSchema.max(800).optional(),
+    additionalConcerns: z.array(additionalConcernSchema).max(20).optional(),
     verifiedClaims: z.array(z.string()),
     limitations: z.array(z.string()),
   })
@@ -139,3 +162,15 @@ export const reviewReportSchema = z
 export type ReviewFindingDraft = z.infer<typeof reviewFindingDraftSchema>;
 export type ReviewFinding = z.infer<typeof reviewFindingSchema>;
 export type ReviewReport = z.infer<typeof reviewReportSchema>;
+
+/** Human thread resolution alone never changes the finding disposition. */
+export function findingIsOutstanding(finding: ReviewFinding): boolean {
+  return finding.status !== "fixed" && !finding.dismissal;
+}
+
+export const reviewFindingRevalidationSchema = z.discriminatedUnion("category", [
+  reviewFindingSchema.options[0].omit({ dismissal: true }),
+  reviewFindingSchema.options[1].omit({ dismissal: true }),
+  reviewFindingSchema.options[2].omit({ dismissal: true }),
+  reviewFindingSchema.options[3].omit({ dismissal: true }),
+]);

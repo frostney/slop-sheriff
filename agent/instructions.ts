@@ -1,7 +1,8 @@
+import { reviewConfigFromAuth } from "../src/config/trusted-review-config";
 import { defineDynamic } from "eve";
 import { defineInstructions } from "eve/instructions";
 import { reviewRouteState } from "./lib/review-route";
-import { reviewChildInstructions, reviewInstructions } from "../src/review/policy";
+import { reviewChildInstructions, reviewInstructions, reviewVoiceInstructions } from "../src/review/policy";
 
 export default defineDynamic({
   events: {
@@ -12,7 +13,7 @@ export default defineDynamic({
         // The workflow supplies task policy; later turns have a durable bound route.
         content: ctx.channel.kind === "subagent"
           ? route ? reviewInstructions(route) : reviewChildInstructions()
-          : reviewInstructions({ role: "coordinator", attempt: 0 }),
+          : reviewVoiceInstructions(reviewConfigFromAuth(ctx.session.auth.current)) + "\n\n" + reviewInstructions({ role: "coordinator", attempt: 0 }),
       });
     },
   },

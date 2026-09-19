@@ -12,8 +12,9 @@ export function addressesKnownGoodReview(body: string): boolean {
 
 export function reviewControlResponse(
   body: string,
-): "approve" | "stop" | null {
+): "approve" | "stop" | "key-budget-repaired" | null {
   const response = body.replace(botMentionPattern, "").trim().toLowerCase();
+  if (response === "key budget repaired") return "key-budget-repaired";
   if (response === "approve" || response === "continue" || response === "1") {
     return "approve";
   }

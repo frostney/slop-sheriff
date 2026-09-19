@@ -107,7 +107,7 @@ describe("review capability preflight", () => {
     expect(second.created).toBeFalse();
     expect(observed.commands).toHaveLength(1);
     expect(second.preflight).toEqual(first.preflight);
-    expect(first.preflight.network).toBe("github-only");
+    expect(first.preflight.network).toBe("public-dependencies");
     expect(first.preflight.repositoryMarkers).toEqual(["Makefile"]);
     expect(
       first.preflight.commands.find((command) => command.name === "fpc"),

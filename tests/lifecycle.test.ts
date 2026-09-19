@@ -85,7 +85,7 @@ describe("review lifecycle", () => {
     ).toEqual({ kind: "delta", revalidatePriorFindings: true });
   });
 
-  test("reuses evidence for merge and rebase semantic no-ops", () => {
+  test("validates persistent work for merge and rebase semantic no-ops", () => {
     expect(
       planReview({
         action: "synchronize",
@@ -98,7 +98,7 @@ describe("review lifecycle", () => {
         head: "rebased-commit",
         patchFingerprint: "same-effective-patch",
       }),
-    ).toEqual({ kind: "reuse", reason: "semantic-no-op" });
+    ).toEqual({ kind: "delta", revalidatePriorFindings: true });
   });
 
   test("never starts a replacement full review for a lost baseline", () => {

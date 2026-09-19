@@ -21,7 +21,8 @@ import {
 } from "../src/review/evidence-ledger";
 import { writeReviewEvidenceManifest } from "../src/review/evidence-bundle";
 import { countPatchTokens, prepareReviewEvidence } from "../src/review/prepare-review-evidence";
-import readReviewEvidenceTool from "../agent/tools/read_review_evidence";
+import { localWorkspaceReceiptPath, physicalWorkspaceReceipt } from "../src/review/physical-workspace";
+import { reviewTool as readReviewEvidenceTool } from "../agent/tools/read_review_evidence";
 import { withTrustedReviewContext } from "../src/github/trusted-context";
 import { parseReviewConfig } from "../src/config/review-config";
 import { commonWorkFixture } from "./common-work-fixture";
@@ -249,6 +250,7 @@ describe("exact-head evidence replay", () => {
       },
       async run({ command }: { readonly command: string }) {
         commands.push(command);
+        if (command === "cd /workspace && git rev-parse --verify HEAD") return { exitCode: 0, stderr: "", stdout: headSha };
         return {
           exitCode: 0,
           stderr: "",
@@ -275,7 +277,10 @@ describe("exact-head evidence replay", () => {
       patchFingerprint: identity.patchFingerprint,
       entries: [],
     };
-    const capabilities = await runCapabilityPreflight(runtime, identity);
+    const capabilities = await runCapabilityPreflight(runtime, identity, {
+      revision: "review-environment-v2-isolated-acquisition", headSha: identity.headSha,
+      inputsDigest: "a".repeat(64), tools: [], completedSteps: [],
+    });
     await writeReviewEvidenceManifest(runtime, manifest);
     const github = prepareExactHeadGitHubEvidence({
       artifactsByRun: new Map(),
@@ -285,6 +290,16 @@ describe("exact-head evidence replay", () => {
       repositoryDatabaseId,
       workflowRuns: [],
     });
+    const requirementText = "Must reject malformed input.";
+    const requirement = {
+      id: `req-${"a".repeat(24)}`, kind: "document" as const,
+      path: "docs/DoD.md", reason: "governance" as const,
+      referencedBy: ["AGENTS.md"], references: [], laneIds: [],
+      baseBlob: "a".repeat(40), headBlob: "a".repeat(40),
+      contentDigest: createHash("sha256").update(requirementText).digest("hex"), characters: requirementText.length,
+      obligations: [{ id: `ob-${"b".repeat(24)}`, base: { line: 1, text: "Must reject malformed input." }, head: { line: 1, text: "Must reject malformed input." } }],
+    };
+    await runtime.writeTextFile({ path: `/tmp/known-good-review/evidence/${identity.patchFingerprint}/requirements/${requirement.id}.txt`, content: requirementText });
     const ledger = assembleReviewEvidenceLedger({
       capabilities: capabilities.preflight,
       commonWork: commonWorkFixture(identity),
@@ -292,6 +307,7 @@ describe("exact-head evidence replay", () => {
       identity,
       manifest,
       probes: [],
+      requirements: [requirement],
     });
     await writeReviewEvidenceLedger(runtime, ledger);
     commands.length = 0;
@@ -312,6 +328,11 @@ describe("exact-head evidence replay", () => {
     const preparation = {
       config: parseReviewConfig(null),
       planKind: identity.planKind,
+      workspaceDependencies: {
+        async createAcquisitionSandbox(): Promise<never> { throw new Error("Offline ledger reuse must not create an acquisition VM"); },
+        async getMergeBase(): Promise<never> { throw new Error("Offline ledger reuse must not fetch repository metadata"); },
+        async getInstallationToken(): Promise<never> { throw new Error("Offline ledger reuse must not contact Connect"); },
+      },
       async collectMemory() {
         collectionCalls += 1;
         return {
@@ -324,6 +345,7 @@ describe("exact-head evidence replay", () => {
         return github;
       },
     };
+    await runtime.writeTextFile({ path: localWorkspaceReceiptPath, content: physicalWorkspaceReceipt(undefined, trusted, ledger) });
 
     const reused = await prepareReviewEvidence(
       runtime as unknown as RuntimeSandboxSession,
@@ -334,7 +356,7 @@ describe("exact-head evidence replay", () => {
 
     expect(reused).toEqual(ledger);
     expect(collectionCalls).toBe(0);
-    expect(commands).toEqual([]);
+    expect(commands).toEqual(["cd /workspace && git rev-parse --verify HEAD"]);
 
     const execute = readReviewEvidenceTool.execute;
     if (!execute) throw new Error("Evidence tool must have an executor");
@@ -364,6 +386,16 @@ describe("exact-head evidence replay", () => {
       operation: "packet", axis: "engineering-quality", path: null, cursor: null,
     }, ctx);
     expect(packet).toMatchObject({ operation: "packet", ledgerDigest: ledger.digest });
+    if (!("operation" in packet)) throw new Error("Expected a terminal evidence result");
+    expect(packet).toMatchObject({ requirements: [requirement] });
+    const projected = await readReviewEvidenceTool.toModelOutput!(packet);
+    expect(projected).toMatchObject({ type: "json", value: {
+      operation: "packet", ledgerDigest: ledger.digest,
+      requirements: [{ id: requirement.id, path: requirement.path,
+        obligations: [{ id: requirement.obligations[0]!.id, baseLine: 1, headLine: 1 }] }],
+      entries: [], totalEntries: 0, nextCursor: null,
+    } });
+    expect(JSON.stringify(projected)).not.toContain("Must reject malformed input.");
     expect(reads.filter((path) => path.endsWith("/ledger.json"))).toHaveLength(1);
     expect(reads.filter((path) => path.endsWith("/capabilities.json"))).toHaveLength(1);
 
@@ -408,7 +440,7 @@ describe("exact-head evidence replay", () => {
     }
   });
 
-  test("records missing generated output once with a repository remedy", () => {
+  test("keeps absent artifacts as availability metadata without a routine gap", () => {
     const prepared = replay({ includeArtifact: false });
 
     expect(prepared.evidence.artifacts).toMatchObject({
@@ -420,9 +452,7 @@ describe("exact-head evidence replay", () => {
         disposition: "check-remedy",
       },
     });
-    expect(prepared.evidence.gaps.map((gap) => gap.id)).toEqual([
-      "exact-head-artifacts-missing",
-    ]);
+    expect(prepared.evidence.gaps.map((gap) => gap.id)).toEqual([]);
   });
 
   test("rejects stale Check and workflow evidence", () => {

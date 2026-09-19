@@ -3,9 +3,22 @@ import { equals, includes } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Checks public GET/HEAD responses through compiled Eve routes and routed root-copy child streaming through production instrumentation.",
+    "Checks compiled public routes plus budget, role, subagent, project-lane, workflow, and structured-output recovery contracts through production instrumentation.",
   tags: ["mock-model", "runtime-smoke"],
   async test(t) {
+    const capabilityTurn = await t.newSession().send("KGR-EVAL-CAPABILITY-ROOT");
+    capabilityTurn.expectOk();
+    capabilityTurn.messageIncludes("CAPABILITY-RESOLUTION-COMPLETE");
+    capabilityTurn.noFailedActions();
+    const capabilityChildEvent = capabilityTurn.events.find(event => event.type === "subagent.called");
+    if (!capabilityChildEvent || capabilityChildEvent.type !== "subagent.called") throw new Error("Capability child was not dispatched");
+    const capabilityChild = await t.target.attachSession(capabilityChildEvent.data.childSessionId);
+    capabilityChild.succeeded();
+    // SDK input rejection precedes action execution, so these are model-visible
+    // validation errors, not failed executor actions in Eve's calledTool view.
+    capabilityChild.messageIncludes("SOURCE-AND-REPORT-INPUTS-REJECTED");
+    capabilityChild.noFailedActions();
+
     // Exercise production channel discovery and Nitro's compiled route names.
     // Content and host-policy matrices remain in the landing unit tests.
     for (const [path, contentType] of [
@@ -33,6 +46,19 @@ export default defineEval({
     }
     for (const method of ["GET", "HEAD"]) {
       t.check((await t.target.fetch("/robots{.txt}", { method })).status, equals(404));
+    }
+
+    const projectSession = t.newSession();
+    const projectTurn = await projectSession.send("KGR-EVAL-AUTHORED-ROOT KGR-EVAL-PROJECT-LANES");
+    projectTurn.expectOk();
+    projectTurn.messageIncludes("AUTHORED-REVIEW-COMPLETE");
+    projectTurn.noFailedActions();
+    const projectChildren = projectTurn.events.filter((event) => event.type === "subagent.called");
+    await t.require(projectChildren.length, equals(2));
+    for (const event of projectChildren) {
+      const child = await t.target.attachSession(event.data.childSessionId);
+      child.succeeded();
+      child.calledTool("fixture_checkpoint", { count: 1 });
     }
 
     const budgetSession = t.newSession();
@@ -100,17 +126,26 @@ export default defineEval({
     t.messageIncludes("AUTHORED-REVIEW-COMPLETE");
     authored.noFailedActions();
     const children = authored.events.filter((event) => event.type === "subagent.called");
-    if (new Set(children.map((event) => event.data.childSessionId)).size !== 5) throw new Error("Expected three lanes, one scout, and a fresh continuation");
+    if (new Set(children.map((event) => event.data.childSessionId)).size !== 3) throw new Error("Expected three independent work contexts with retained native continuation");
     for (const event of children) {
       const child = await t.target.attachSession(event.data.childSessionId);
       child.succeeded();
     }
 
+    const continued = children.filter(event => event.data.callId.endsWith(":1"));
+    if (continued.length !== 1 || children.filter(event => event.data.childSessionId === continued[0]!.data.childSessionId).length !== 2) throw new Error("Incomplete work did not continue in its exact native child context");
+
+    const continuedWorkId = continued[0]!.data.callId.split(":").at(-2)!;
+    const currentReceipt = await (await t.target.fetch("/fixture/work-result", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rootSessionId: authored.sessionId, workId: continuedWorkId }) })).json() as { invocation: { invocationId: string; sessionId: string; turnId: string }; status: string };
+    t.check(currentReceipt.invocation.invocationId, equals(continued[0]!.data.callId));
+    t.check(currentReceipt.invocation.sessionId, equals(continued[0]!.data.childSessionId));
+    t.check(currentReceipt.status, equals("complete"));
+
     const repeated = await t.send("KGR-EVAL-AUTHORED-REPEAT");
     repeated.messageIncludes("AUTHORED-REPLAY-COMPLETE");
     repeated.noFailedActions();
     const repeatedChildren = repeated.events.filter((event) => event.type === "subagent.called");
-    if (new Set(repeatedChildren.map((event) => event.data.childSessionId)).size !== 3) throw new Error("Same-root replay did not reuse complete checkpoints");
+    if (new Set(repeatedChildren.map((event) => event.data.childSessionId)).size !== 0) throw new Error("Same-root replay dispatched already completed work");
 
     const guardedSession = t.newSession();
     const guarded = await guardedSession.send("KGR-EVAL-ROOT-GUARD");
@@ -126,14 +161,16 @@ export default defineEval({
     const concurrent = await concurrentSession.send("KGR-EVAL-CONCURRENT-ROOT");
     concurrent.messageIncludes("CONCURRENT-GUARD-COMPLETE");
     const concurrentChildren = concurrent.events.filter((event) => event.type === "subagent.called");
-    if (new Set(concurrentChildren.map((event) => event.data.childSessionId)).size !== 5) throw new Error("Concurrent invocation admitted duplicate lanes");
+    if (new Set(concurrentChildren.map((event) => event.data.childSessionId)).size !== 3) throw new Error("Concurrent invocation admitted duplicate component contexts");
 
-    const windowSession = t.newSession();
-    const window = await windowSession.send("KGR-EVAL-WINDOW-ROOT");
-    window.event("turn.failed");
-    const requested = window.events.find((event) => event.type === "actions.requested" && event.data.actions.some((action) => "toolName" in action && action.toolName === "review_workflow"));
-    if (!requested || requested.type !== "actions.requested" || requested.data.stepIndex !== 16) throw new Error("Workflow cutoff was not exercised at step sixteen");
-    if (window.events.some((event) => event.type === "subagent.called")) throw new Error("Workflow cutoff dispatched a child");
-    if (!JSON.stringify(window.events).includes("further workflow dispatch is forbidden")) throw new Error("Workflow cutoff did not fail through the application hook");
+    const lostHandle = await t.newSession().send("KGR-EVAL-LOST-HANDLE-ROOT");
+    lostHandle.expectOk();
+    lostHandle.messageIncludes("LOST-HANDLE-REJECTED");
+    const lostChildren = lostHandle.events.filter(event => event.type === "subagent.called");
+    if (lostChildren.length !== 2 || lostChildren[0]!.data.childSessionId === lostChildren[1]!.data.childSessionId) throw new Error("Missing handle fixture did not exercise native fresh-child fallback");
+    const rejectedFreshChild = await t.target.attachSession(lostChildren[1]!.data.childSessionId);
+    rejectedFreshChild.notCalledTool("fixture_checkpoint");
+    if (rejectedFreshChild.events.some(event => event.type === "step.started" || event.type === "message.completed")) throw new Error("Unauthorized fresh work child reached a model step");
+
   },
 });

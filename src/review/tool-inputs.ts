@@ -1,13 +1,13 @@
 import { z } from "zod";
-import { reviewFindingSchema } from "./findings";
-import { reviewReportDraftSchema } from "./report-assembly";
+import { reviewFindingRevalidationSchema } from "./findings";
+import { reviewAdjudicationDraftSchema } from "./adjudication";
 
 export const assembleReviewReportInputSchema = z
   .strictObject({
-    draft: reviewReportDraftSchema,
+    draft: reviewAdjudicationDraftSchema,
   });
 
 export const recordReviewRevalidationInputSchema = z
   .strictObject({
-    findings: z.array(reviewFindingSchema).max(100),
+    findings: z.array(reviewFindingRevalidationSchema).max(100),
   });

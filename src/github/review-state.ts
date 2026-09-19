@@ -16,6 +16,8 @@ export const reviewStateSchema = z.object({
   schemaVersion: z.literal(2),
   app: z.literal("known-good-review"),
   pullRequest: z.number().int().positive(),
+  currentHead: z.string().min(1).optional(),
+  legacyChecksMigrated: z.boolean().optional(),
   initialFullStatus: z.enum([
     "never",
     "debouncing",
@@ -28,6 +30,7 @@ export const reviewStateSchema = z.object({
       blocking: z.boolean(),
       profile: z.enum(reviewProfiles),
       personality: z.boolean().optional(),
+      voice: z.enum(["theatrical", "understated", "off"]).optional(),
     })
     .optional(),
   baseline: z
@@ -35,8 +38,11 @@ export const reviewStateSchema = z.object({
       head: z.string().min(1),
       patchFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       findingsArtifactUrl: z.url(),
+      reviewPolicyDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
       files: z.record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/)),
       report: reviewReportSchema,
+      findingThreadIdentities: z.record(z.string().regex(/^CR-[1-9]\d*$/), z.string().regex(/^[a-f0-9]{64}$/)).optional(),
+      findingRuntimeRequirements: z.record(z.string().regex(/^CR-[1-9]\d*$/), z.boolean()).optional(),
     })
     .nullable(),
   pendingPublication: z
@@ -60,8 +66,11 @@ const partMarker = "known-good-review:state-part:v1";
 const attachmentLabel = "Review state attachment.";
 
 function visibleState(parsed: ReviewState): string {
-  return parsed.failure
+  return parsed.failure || parsed.initialFullStatus === "failed"
     ? reviewProgressBody("failed", parsed.publication?.personality)
+    : parsed.pendingPublication ? reviewProgressBody("running", parsed.publication?.personality)
+    : parsed.currentHead && parsed.baseline && parsed.currentHead !== parsed.baseline.head && parsed.initialFullStatus === "completed"
+      ? "## ⚠️ Slop Sheriff: review outdated\n\nThe current revision has not been completely reviewed."
     : parsed.initialFullStatus === "completed" && parsed.baseline
       ? reviewResultBody(
           parsed.baseline.report,

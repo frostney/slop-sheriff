@@ -5,6 +5,7 @@
     "": {
       "name": "known-good-review",
       "dependencies": {
+        "@agent-browser/eve": "0.37.1",
         "@ai-sdk/gateway": "4.0.78",
         "@chat-adapter/github": "4.40.0",
         "@convex-dev/rag": "0.7.6",
@@ -17,12 +18,14 @@
         "convex": "1.45.0",
         "eve": "0.52.5",
         "js-tiktoken": "1.0.21",
+        "semver": "7.8.5",
         "yaml": "2.9.0",
         "zod": "4.6.1",
       },
       "devDependencies": {
         "@types/bun": "1.4.2",
         "@types/node": "24.13.4",
+        "@types/semver": "7.8.0",
         "convex-test": "0.0.57",
         "just-bash": "3.4.2",
         "typescript": "7.0.2",
@@ -33,6 +36,10 @@
     "ai": "7.0.97",
   },
   "packages": {
+    "@agent-browser/eve": ["@agent-browser/eve@0.37.1", "", { "dependencies": { "@agent-browser/sandbox": "^0.37.1", "zod": "4.4.3" }, "peerDependencies": { "eve": ">=0.39.1" } }, "sha512-aGBOKA1rpHhD/NZvjRI+jf7yku7eXRRN+N8wgiTljnZ/+ODr241Fy+q7MdRzIW6ul1VscyWmvZ3ZfDOjSEJGiw=="],
+
+    "@agent-browser/sandbox": ["@agent-browser/sandbox@0.37.1", "", { "peerDependencies": { "@vercel/sandbox": ">=1.0.0" }, "optionalPeers": ["@vercel/sandbox"] }, "sha512-vgSgTpxfUWni5NNK9yqC1THtmRVkzL017UabUZ3kwVXzVKUaZ0Ru8iGP48on4AN1NIGD95OWBjrKabdTi6vcDg=="],
+
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.78", "", { "dependencies": { "@ai-sdk/provider": "4.0.13", "@ai-sdk/provider-utils": "5.0.39", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-fcamzmFlcy+c/tIc7QcATLe/kArgSVGQ1QxaddMjhOSX8zypc2hmD5sHB2bp1DSFcSxDD32d6usF9a7xLCTULg=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@4.0.13", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-sJvnbFIFLzmKFXIjfwS8XCOAj6puHCawItwvA9PBZgk2f/l/TiC4OSfK3ueDbUVXfRCOn5eJN97EIF10toIOmQ=="],
@@ -206,6 +213,8 @@
     "@types/ms": ["@types/ms@2.1.0", "", {}, "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA=="],
 
     "@types/node": ["@types/node@24.13.4", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-YJ7EqCstVTzIr0fMr7qul/977en+pQHrfmuKIo6Zr9i75Be21dr3MovcfvGtyvi2HAUrRerWps5sMO9I7WaxDw=="],
+
+    "@types/semver": ["@types/semver@7.8.0", "", {}, "sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ=="],
 
     "@types/unist": ["@types/unist@3.0.3", "", {}, "sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q=="],
 
@@ -666,6 +675,8 @@
     "zod": ["zod@4.6.1", "", {}, "sha512-341aRWQsve0rvronKNTqZpjmzdbUDlFuzHaI/XLg/Ej82qffDJRRfBTCuv7+9q/rMjB6LSLyEBnW4InJeMtt/Q=="],
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
+
+    "@agent-browser/eve/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@ai-sdk/provider-utils/@workflow/serde": ["@workflow/serde@4.1.0", "", {}, "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="],
 

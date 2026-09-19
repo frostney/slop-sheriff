@@ -1,3 +1,4 @@
+import { outsideReviewWork } from "../lib/review-capabilities";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { githubAdapter } from "../../src/github/chat-adapter";
@@ -7,7 +8,12 @@ import {
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
 
-export default defineTool({
+export const verifyReviewHeadOutputSchema = z.strictObject({ valid: z.boolean(),
+  expected: z.strictObject({ base: z.string(), head: z.string() }),
+  current: z.strictObject({ base: z.string(), head: z.string(), draft: z.boolean(), state: z.string() }),
+});
+
+export const reviewTool = defineTool({
   description:
     "Revalidate that the pull request is still open, reviewable, and at the trusted base/head before inspecting or publishing it. Call this after the initial debounce and immediately before every review.",
   inputSchema: z.object({}),
@@ -53,3 +59,5 @@ export default defineTool({
     };
   },
 });
+
+export default outsideReviewWork(reviewTool);

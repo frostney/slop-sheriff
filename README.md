@@ -9,7 +9,7 @@ GitHub channel, and publishes aggregate and per-axis Checks, one visible result
 summary, and stable inline finding threads through the official Chat SDK GitHub
 adapter's typed Octokit surface.
 
-[Meet the sheriff](https://slop-sheriff.vercel.app) · [Self-hosting instructions](docs/install.md)
+[Meet the sheriff](https://slop-sheriff.dev) · [Self-hosting instructions](docs/install.md)
 
 Run your own sheriff on your own Vercel, Gateway and Convex accounts. There is
 no public hosted installation service.
@@ -27,9 +27,9 @@ flowchart TD
   D -->|"Reviewable"| B{"Completed baseline?"}
   B -->|"No, first review"| F["Full review once"]
   B -->|"Baseline lost"| L["Fail closed; wait for authorized manual full"]
-  B -->|"Yes"| P{"Effective patch changed?"}
-  P -->|"No; merge or rebase only"| R["Reuse evidence; publish current-head Check"]
-  P -->|"Yes"| Q["Exact-file delta review plus prior-finding revalidation"]
+  B -->|"Yes"| Q["Validate current component and requirement inputs"]
+  Q --> R["Reuse valid assessments; review changed work"]
+  R --> P["Reconcile findings and publish current status"]
   M["Authorized manual full command"] --> F
 ```
 
@@ -37,15 +37,14 @@ flowchart TD
 - A draft becoming ready starts its first full review immediately.
 - New commits during the debounce reset it. A new event steers and cancels
   stale active Eve work.
-- After the first successful full review, only semantic delta files are freshly
-  reviewed. Every open Blocking/Important finding and relevant Improvement or
-  Nitpick is revalidated; other presentation-only findings are carried forward.
-- Merge and rebase SHA churn is compared by normalized effective patch. A
-  semantic no-op does not call a model and does not start another review; it
-  only creates or updates the required Check on the current head.
-- A missing, malformed, or failed baseline never triggers an automatic
-  replacement full review. A write/maintain/admin user can explicitly request
-  one with `@slop-sheriff run full review`.
+- Every update checks the complete current PR scope. Completed assessments survive
+  pushes before publication, and changed components receive the update since their
+  previously assessed head plus retained evidence.
+- Matching diff text is not sufficient proof for a rebase. Source dependencies,
+  requirement clauses and test observations determine reuse.
+- A known interrupted initial review retains completed work. Missing or corrupted
+  canonical state fails closed; a repository writer can explicitly request
+  `@slop-sheriff run full review` when recovery cannot establish authority.
 - A current-head failure with validated checkpoints retains a sanitized retry
   envelope. An authorized `@slop-sheriff continue` resumes only recorded
   missing stages in the same durable session; mismatched or ineligible state
@@ -57,15 +56,15 @@ flowchart TD
   A publication-only continuation retries GitHub directly without a model or
   completed review work.
 
-One GitHub summary comment holds the authoritative versioned review state and
+One GitHub summary comment holds the published versioned review state and
 complete v2 findings artifact. Large state is compressed and, when needed, split
-into immutable attachments saved before the summary pointer changes. Convex stores advisory,
-repository-scoped cross-PR memory
-through `@convex-dev/rag`; it never owns the current verdict, baseline, or
-finding status. Recent matches remain individual while older matches collapse
+into immutable attachments saved before the summary pointer changes. Dedicated
+Convex ledgers own admission, execution recovery, signed evidence, publication
+outboxes and cost accounting. Separate cross-PR memory through `@convex-dev/rag`
+is advisory; it cannot change the verdict, baseline or finding status. Recent matches remain individual while older matches collapse
 to bounded semantic-cluster representatives after the repository has enough
 review history. The GitHub state allows the next webhook to distinguish the
-first review, an exact delta, a semantic no-op, and a lost baseline.
+first review, a current update, and a lost baseline.
 
 ## Trusted repository configuration
 
@@ -87,23 +86,21 @@ publicRoots:
   - website
 ```
 
-`model` defaults to this ordered AI Gateway fallback chain:
+Unconfigured tasks use candidate task-specific routing: Luna with low reasoning
+for triage/presentation and medium for analysis, verification and adjudication;
+explicit ambiguity can escalate to Sol. These candidates still require the
+[quality and complete-lifecycle cost evaluation](docs/validation/review-quality.md).
+The target is under $1 for a routine PR lifecycle, never a runtime cutoff.
 
-- `openai/gpt-5.6-sol`
-- `moonshotai/kimi-k3`
-- `anthropic/claude-opus-5`
-
-Any currently listed AI Gateway language model with tool use is accepted;
-there is no model allowlist. Comma-separated IDs form an ordered fallback
-chain. `agents` is optional: a string applies one chain to every subagent,
-while a mapping can override project-owned review axes without creating a
-second lane system. `scout` defaults to `openai/gpt-5.6-luna` with xhigh
-reasoning and can be overridden like the axes:
+An explicit `model` preserves that ordered Gateway chain. `agents` can override
+all subagents or individual review categories; `tasks` can override model and
+reasoning by task. Current Gateway language models must support tool use.
+Dependency and duplicate-design concerns now belong to the core technical
+assessment, so a separate deduplication worker is not dispatched.
 
 ```yaml
 model: openai/gpt-5.6-sol, anthropic/claude-opus-5
 agents:
-  deduplication: moonshotai/kimi-k3, openai/gpt-5.6-sol
   claim-and-specification: anthropic/claude-opus-5
   engineering-quality: openai/gpt-5.6-sol
   discoverability: moonshotai/kimi-k3
@@ -113,22 +110,34 @@ agents:
   scout: openai/gpt-5.6-luna
 ```
 
-Set `personality: false` for plain review language. The default cowboy voice
-changes presentation only; it never changes evidence, severity, coverage, or
-blocking policy. Each finding has an impact summary of at most 300 characters
-and expandable full analysis. Existing reports retain their full impact and
-finding identity. See the [voice and visual guide](docs/brand.md).
+Choose `voice: theatrical` (default), `voice: understated`, or
+`voice: off`. `personality: false` also selects plain language. A trusted-base
+`voiceGuide: docs/review-voice.md` can customize style without changing evidence,
+severity, or the recommendation. Each finding has a 25 to 45 word introduction,
+expandable evidence, applicable principle and fix direction, then visible Impact
+(at most 300 characters) and one-sentence Risk. The whole comment stays within
+200 words. With personality enabled, a compact robot portrait reacts to the
+finding: alarmed for Blocking, skeptical for Important, inspired for Improvement,
+and a cheeky wink for Nitpick. Both `voice: off` and `personality: false` hide it.
+These are reusable images, with no image-generation calls during reviews.
+See the [voice and visual guide](docs/brand.md).
 The [validation record](docs/validation/slop-sheriff.md) includes comment
 previews, policy measurements and the remaining real-model comparison work.
 
-The core reuse/design, claim/specification, and engineering-quality lanes
-remain active. The spec-testing lane checks explicit requirements through real
-interfaces. A conditional test-health lane checks affected tests as frozen
+One broad core covers correctness, claims, reuse and test value. Triage selects
+specialists from changed content, with reasons retained in coverage: behavior
+changes get real-interface specification checks; public contracts, dependencies
+and consequential risks receive focused additional review. Unknown or incomplete
+patches widen coverage conservatively. A conditional test-health lane checks affected tests as frozen
 consumer contracts: public outcomes, failure sensitivity and tolerance of
 internal refactors. Discoverability is conditional on public web content; writing
-quality activates for files that may contain authored prose, strings or
-comments. Specialist reports classify their scope and preserve failed and
-unverified results. An unavailable runtime never becomes a behavioral pass.
+quality activates for changed authored prose, strings or substantive comments. Specialist reports classify their scope and preserve failed and
+unverified results. Supported defects from every lane are posted inline;
+only actionable unrelated existing concerns appear in the main summary details. Before dispatch,
+shared setup installs declared toolchains, locked dependencies and needed browser
+components. Setup failure prevents review completion. Real external requirements
+remain explicit limitations. Fixed bot threads receive a brief acknowledgement
+and commit link, then resolve only with evidence matching the original finding.
 
 The former `agents.commenter` key remains accepted for configuration
 compatibility but is ignored; publication formatting is deterministic.
@@ -192,6 +201,13 @@ Gateway-native accounting categories remain separate.
 
 ## Local development
 
+Every change receives `/code-review` and `/test-against-spec` before delivery.
+Run both project-local skills against the current candidate without waiting for
+a separate review request. The specification review exercises real interfaces
+against explicit requirements, including failure paths. Mocked tests and the
+project gate remain separate evidence. Recheck affected results after fixes and
+report any behavior that remains unverified. See [AGENTS.md](AGENTS.md).
+
 Requirements are Bun 1.4.2 and the runtime prerequisites selected by Eve's
 local sandbox backend. The project intentionally uses Bun for installs, scripts,
 tests, and builds. Node 24 remains the deployment engine because that is the
@@ -212,6 +228,11 @@ without provisioning a hosted sandbox snapshot.
 It does not call a paid model. Convex code is also type-checked locally; a
 Convex deployment is needed only to regenerate bindings or exercise HTTP
 actions.
+
+The [model contract gate](docs/operations/model-contracts.md) covers generated
+schemas, malformed report streams and recovery through persistence and report
+assembly. These checks must pass before a paid canary; valid mock reports alone
+do not establish a working model boundary.
 
 `bun run replay:pr61` validates all four recorded Pascal MCP SDK PR 61 runs
 offline and prints phase-by-phase recorded and projected candidate timings,
@@ -244,7 +265,7 @@ reviews. Missing or malformed keys reject review admission.
 
 Give Convex its AI Gateway key and
 the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
-same token. The app needs repository metadata read, contents read, Actions read,
+same token. The app needs repository metadata read, contents write, Actions read,
 pull requests read/write, issues read/write, and checks read/write. Forward
 `pull_request`, `issue_comment`, `installation`, and
 `installation_repositories` events through Connect to `/eve/v1/github`.
@@ -289,5 +310,6 @@ state markers remain compatible. Renaming the GitHub App registration is a
 separate operational change; keep `GITHUB_BOT_USER_ID` pinned to that App
 when changing its login. See [brand migration](docs/brand.md#operational-migration).
 
-See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
+See [project lane authoring](docs/custom-lanes.md), [requirements and documentation checks](docs/requirements.md),
+[comment examples in all three voice modes](docs/review-examples.md), [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

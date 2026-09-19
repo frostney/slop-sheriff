@@ -44,6 +44,11 @@ not installed because they do not apply to this repository. `skills-lock.json`
 records `frostney/known-good-route` as the source and the Skills CLI content hash
 for those installed development skills; this repository does not author them.
 
+`test-against-spec` is also installed through the Skills CLI and recorded in
+`skills-lock.json`. Together with `code-review`, it is a mandatory development
+review for every change, as specified in `AGENTS.md`. These development reviews
+do not add runtime agents or require additional paid model calls.
+
 ## mattpocock/skills
 
 - Source: `https://github.com/mattpocock/skills`

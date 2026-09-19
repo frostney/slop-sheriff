@@ -1,3 +1,4 @@
+import { lifecycleConfigured } from "../../src/lifecycle/client";
 import type { Octokit } from "@octokit/rest";
 import type { ReviewConfig } from "../../src/config/review-config";
 import {
@@ -37,6 +38,7 @@ export async function publishPendingReview(input: {
     octokit: input.octokit,
     report: pending.report,
   });
+  if (lifecycleConfigured()) return { ...publication, memory: { status: "pending-publication" as const } };
   const memory = await enqueueReviewMemory(
     normalizedReviewMemory({
       config: input.config,

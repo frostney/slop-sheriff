@@ -6,6 +6,8 @@ import {
 } from "../memory/contracts";
 import { reviewAxes, type ReviewAxis } from "../review/axes";
 
+import { projectLanesSchema, trustedReferencePathSchema, type ProjectLane } from "../review/project-lanes";
+
 export const defaultModels = [
   "openai/gpt-5.6-sol",
   "moonshotai/kimi-k3",
@@ -20,20 +22,37 @@ export const defaultEmbedding: EmbeddingConfig = {
 };
 
 export type ModelChain = readonly [string, ...string[]];
+export const reviewTasks = ["triage", "analysis", "verification", "adjudication", "presentation"] as const;
+export type ReviewTask = (typeof reviewTasks)[number];
+export const reviewReasoningLevels = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ReviewReasoning = (typeof reviewReasoningLevels)[number];
+export interface ReviewTaskConfig {
+  readonly model?: ModelChain;
+  readonly reasoning?: ReviewReasoning;
+  readonly escalationModel?: ModelChain;
+  readonly escalationReasoning?: ReviewReasoning;
+}
 export const reviewProfiles = ["focused", "balanced", "thorough"] as const;
 export type ReviewProfile = (typeof reviewProfiles)[number];
 export const specialistRoles = ["scout"] as const;
 export type SpecialistRole = (typeof specialistRoles)[number];
 export type ReviewAgentRole = ReviewAxis | SpecialistRole;
-type AcceptedReviewAgentRole = ReviewAgentRole | "commenter";
 
 export interface ReviewConfig {
   readonly model: ModelChain;
+  /** Records whether the repository explicitly chose its general model chain. */
+  readonly modelConfigured?: boolean;
+  readonly tasks?: Readonly<Partial<Record<ReviewTask, ReviewTaskConfig>>>;
   readonly embedding: EmbeddingConfig;
   readonly publicRoots: readonly string[];
   readonly profile: ReviewProfile;
   readonly blocking: boolean;
   readonly personality: boolean;
+  readonly voice?: "theatrical" | "understated" | "off";
+  readonly voiceGuide?: string;
+  readonly voiceGuideContent?: string;
+  readonly requirementPaths?: readonly string[];
+  readonly lanes?: readonly ProjectLane[];
   readonly agents:
     | { readonly kind: "inherit" }
     | { readonly kind: "all"; readonly models: ModelChain }
@@ -46,24 +65,26 @@ export interface ReviewConfig {
 const rawConfigSchema = z
   .strictObject({
     model: z.string().optional(),
+    tasks: z.partialRecord(z.enum(reviewTasks), z.strictObject({
+      model: z.string().optional(),
+      reasoning: z.enum(reviewReasoningLevels).optional(),
+      escalationModel: z.string().optional(),
+      escalationReasoning: z.enum(reviewReasoningLevels).optional(),
+    })).optional(),
     embedding: z.string().optional(),
     embeddingDimension: z.number().int().optional(),
     publicRoots: z.array(z.string().min(1)).optional(),
     profile: z.enum(reviewProfiles).optional(),
     blocking: z.boolean().optional(),
     personality: z.boolean().optional(),
+    voice: z.enum(["theatrical", "understated", "off"]).optional(),
+    voiceGuide: trustedReferencePathSchema.optional(),
+    requirementPaths: z.array(trustedReferencePathSchema).max(100).optional(),
+    lanes: projectLanesSchema.optional(),
     agents: z
       .union([
         z.string(),
-        z
-          .strictObject(
-            Object.fromEntries(
-              [...reviewAxes, ...specialistRoles, "commenter"].map((role) => [
-                role,
-                z.string().optional(),
-              ]),
-            ) as Record<AcceptedReviewAgentRole, z.ZodOptional<z.ZodString>>,
-          ),
+        z.record(z.string(), z.string()),
       ])
       .optional(),
   });
@@ -119,11 +140,16 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   if (source === null || source === undefined || source.trim() === "") {
     return {
       model: [...defaultModels],
+      modelConfigured: false,
+      tasks: {},
       embedding: defaultEmbedding,
       publicRoots: [],
       profile: defaultProfile,
       blocking: false,
       personality: true,
+      voice: "theatrical",
+      requirementPaths: [],
+      lanes: [],
       agents: { kind: "inherit" },
     };
   }
@@ -160,7 +186,20 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   const publicRoots = parsePublicRoots(result.data.publicRoots);
   const profile = result.data.profile ?? defaultProfile;
   const blocking = result.data.blocking ?? false;
-  const personality = result.data.personality ?? true;
+  const personality = result.data.personality !== false && result.data.voice !== "off";
+  const extensions = {
+    modelConfigured: result.data.model !== undefined,
+    tasks: Object.fromEntries(Object.entries(result.data.tasks ?? {}).map(([task, settings]) => [task, {
+      ...(settings.model ? { model: parseModelChain(settings.model, `tasks.${task}.model`) } : {}),
+      ...(settings.escalationModel ? { escalationModel: parseModelChain(settings.escalationModel, `tasks.${task}.escalationModel`) } : {}),
+      ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
+      ...(settings.escalationReasoning ? { escalationReasoning: settings.escalationReasoning } : {}),
+    }])),
+    voice: personality ? result.data.voice ?? "theatrical" as const : "off" as const,
+    ...(result.data.voiceGuide ? { voiceGuide: result.data.voiceGuide } : {}),
+    requirementPaths: result.data.requirementPaths ?? [],
+    lanes: result.data.lanes ?? [],
+  };
   if (agents === undefined) {
     return {
       model,
@@ -169,6 +208,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
       profile,
       blocking,
       personality,
+      ...extensions,
       agents: { kind: "inherit" },
     };
   }
@@ -180,6 +220,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
       profile,
       blocking,
       personality,
+      ...extensions,
       agents: { kind: "all", models: parseModelChain(agents, "agents") },
     };
   }
@@ -188,7 +229,11 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   if (agents.commenter !== undefined) {
     parseModelChain(agents.commenter, "agents.commenter");
   }
-  for (const role of [...reviewAxes, ...specialistRoles]) {
+  const acceptedRoles = [...reviewAxes, ...specialistRoles, ...extensions.lanes.map((lane) => lane.id)];
+  for (const role of Object.keys(agents)) {
+    if (role !== "commenter" && !acceptedRoles.some((accepted) => accepted === role)) throw new Error(`Invalid review configuration: Unknown review agent role ${role}`);
+  }
+  for (const role of acceptedRoles) {
     const configured = agents[role];
     if (configured !== undefined) {
       models[role] = parseModelChain(configured, `agents.${role}`);
@@ -202,6 +247,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
     profile,
     blocking,
     personality,
+    ...extensions,
     agents: { kind: "axes", models },
   };
 }

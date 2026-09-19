@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import cleanupReview from "../agent/tools/cleanup_review";
+import { reviewTool as cleanupReview } from "../agent/tools/cleanup_review";
 
 test("cleanup removes evidence, always stops compute, and propagates deletion failures", async () => {
   const execute = cleanupReview.execute;

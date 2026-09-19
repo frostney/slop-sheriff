@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { reviewExecutionReferencesSchema } from "./execution-reference";
 import type { ReviewAxis } from "./axes";
-import { reviewAxes } from "./axes";
+import { reviewAxisSchema } from "./axes";
 import {
   findingChurnSchema,
   reviewFindingEvidenceSchema,
@@ -10,7 +11,7 @@ import { isSpecialistAxis } from "./specialist-scope";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const observationSchema = z.object({
+const observationSchema = z.strictObject({
   disposition: z.enum(["candidate", "dismissed", "lead"]),
   summary: z.string().min(1).max(1_000),
   evidence: z.array(z.string().min(1).max(500)).max(12),
@@ -21,9 +22,11 @@ const laneReportCandidateSchema = reviewFindingEvidenceSchema
   .extend({
     churn: findingChurnSchema.nullable(),
     uncertainty: z.array(boundedReportText).max(12),
+    evidenceRefs: reviewExecutionReferencesSchema.optional(),
   });
 
 export const specialistCheckSchema = z.strictObject({
+  evidenceRefs: reviewExecutionReferencesSchema.optional(),
   entries: z.array(z.number().int().nonnegative()).min(1).max(2_000),
   requirement: boundedReportText,
   source: boundedReportText,
@@ -34,9 +37,25 @@ export const specialistCheckSchema = z.strictObject({
   status: z.enum(["passed", "failed", "unverified", "out-of-scope"]),
 });
 
+export const requirementCheckSchema = z.strictObject({
+  evidenceRefs: reviewExecutionReferencesSchema.optional(),
+  sourceId: z.string().regex(/^req-[a-f0-9]{24}$/),
+  obligationId: z.string().regex(/^ob-[a-f0-9]{24}$/).nullable(),
+  requirement: boundedReportText,
+  establishedRequirement: boundedReportText,
+  basis: z.enum(["established", "new-claim", "approved-change", "not-applicable"]),
+  proposedChange: boundedReportText,
+  approvalEvidence: boundedReportText.nullable(),
+  expected: boundedReportText,
+  observed: boundedReportText,
+  action: boundedReportText,
+  environment: boundedReportText,
+  status: z.enum(["passed", "failed", "unverified", "out-of-scope"]),
+});
+
 export const laneCompletedReportSchema = z
   .strictObject({
-    axis: z.enum(reviewAxes),
+    axis: reviewAxisSchema,
     scope: z
       .strictObject({
         claim: boundedReportText,
@@ -60,6 +79,7 @@ export const laneCompletedReportSchema = z
           .strictObject({
             commandOrAction: boundedReportText,
             result: boundedReportText,
+            evidenceRefs: reviewExecutionReferencesSchema.optional(),
           }),
       )
       .max(100),
@@ -67,18 +87,29 @@ export const laneCompletedReportSchema = z
     verifiedClaims: z.array(boundedReportText).max(100),
     limitations: z.array(boundedReportText).max(100),
     specialistChecks: z.array(specialistCheckSchema).max(2_000).nullable().optional(),
-  })
-  .refine(
-    (report) =>
-      Buffer.byteLength(JSON.stringify(report), "utf8") <= 24_000,
-    "A completed lane report must not exceed 24,000 UTF-8 bytes",
-  );
+    requirementChecks: z.array(requirementCheckSchema).max(2_000).nullable().optional(),
+  });
 
 export type LaneCompletedReport = z.infer<typeof laneCompletedReportSchema>;
+
+/** Application aggregation preserves every completed unit without inheriting a
+ * single model response's transport bounds. The finding contract is unchanged. */
+export const aggregateLaneCompletedReportSchema = z.strictObject({
+  ...laneCompletedReportSchema.shape,
+  scope: z.strictObject({ claim: z.string().min(1), dirtyState: z.string().min(1), inspectedSupportingContext: z.array(boundedReportText) }),
+  coverage: z.strictObject({ staticOnly: z.array(boundedReportText), unreached: z.array(boundedReportText) }),
+  churn: z.strictObject({ window: z.string().min(1), symbolCoverage: z.array(boundedReportText), fileFallbacks: z.array(boundedReportText) }),
+  probes: z.array(laneCompletedReportSchema.shape.probes.element),
+  candidates: z.array(laneReportCandidateSchema),
+  verifiedClaims: z.array(boundedReportText), limitations: z.array(boundedReportText),
+  specialistChecks: z.array(specialistCheckSchema).nullable().optional(),
+  requirementChecks: z.array(requirementCheckSchema).nullable().optional(),
+});
 
 const laneCompletedReportDraftSchema = laneCompletedReportSchema.safeExtend({
   candidates: z.array(laneReportCandidateSchema.extend({ impactSummary: findingImpactSummarySchema })).max(100),
   specialistChecks: z.array(specialistCheckSchema).max(2_000).nullable(),
+  requirementChecks: z.array(requirementCheckSchema).max(2_000).nullable(),
 });
 
 export const laneCheckpointContentSchema = z
@@ -89,7 +120,7 @@ export const laneCheckpointContentSchema = z
     observations: z.array(observationSchema).max(40),
     nextSteps: z.array(z.string().min(1).max(500)).max(20),
     limitations: z.array(z.string().min(1).max(500)).max(20),
-    completedReport: laneCompletedReportSchema.nullable(),
+    completedReport: aggregateLaneCompletedReportSchema.nullable(),
   })
   .superRefine((checkpoint, ctx) => {
     if (checkpoint.status === "complete" && !checkpoint.completedReport) {
@@ -127,11 +158,12 @@ export const laneCheckpointContentSchema = z
 
 export const laneCheckpointSchema = laneCheckpointContentSchema.extend({
   schemaVersion: z.literal(3),
-  axis: z.enum(reviewAxes),
+  axis: reviewAxisSchema,
   baseSha: revisionSchema,
   headSha: revisionSchema,
   patchFingerprint: fingerprintSchema,
   evidenceDigest: fingerprintSchema,
+  laneRegistryDigest: fingerprintSchema.optional(),
   revision: z.number().int().positive(),
 });
 
@@ -147,6 +179,7 @@ export interface LaneCheckpointIdentity {
   readonly headSha: string;
   readonly patchFingerprint: string;
   readonly evidenceDigest: string;
+  readonly laneRegistryDigest?: string | undefined;
 }
 
 export interface LaneCheckpointSandbox {
@@ -175,6 +208,8 @@ function validateCompletedReportAxis(
 export function validateLaneCheckpointCoverage(
   content: LaneCheckpointContent,
   entryCount: number,
+  requirementIds: readonly string[] = [],
+  obligations: readonly { id: string; sourceId: string }[] = [],
 ): void {
   const exactEntryCount = z.number().int().nonnegative().parse(entryCount);
   const reviewed = new Set(content.reviewedEntries);
@@ -213,6 +248,37 @@ export function validateLaneCheckpointCoverage(
       throw new Error("Specialist checks must classify every manifest entry without expanding scope");
     }
   }
+  if (report) {
+    if ((report.specialistChecks ?? []).some((check) => check.status === "unverified") ||
+        (report.requirementChecks ?? []).some((check) => check.status === "unverified")) {
+      throw new Error("Required verification remains unverified; repair and retry or keep the review incomplete");
+    }
+    const checks = report.requirementChecks ?? [];
+    if (checks.some((check) => (check.basis === "not-applicable") !== (check.status === "out-of-scope"))) {
+      throw new Error("Only an explicitly inapplicable requirement can be classified out-of-scope");
+    }
+    if (checks.some((check) => check.basis === "approved-change" && check.approvalEvidence === null)) {
+      throw new Error("Superseding an established requirement requires explicit maintainer approval evidence");
+    }
+    const expectedSources = new Set(requirementIds);
+    const checkedSources = new Set(checks.map((check) => check.sourceId));
+    if ([...checkedSources].some((id) => !expectedSources.has(id))) {
+      throw new Error("Requirement checks must cite prepared source IDs without expanding scope");
+    }
+    for (const check of checks) {
+      if (check.obligationId !== null && !obligations.some((obligation) => obligation.id === check.obligationId && obligation.sourceId === check.sourceId)) {
+        throw new Error("Requirement checks must bind each obligation to its prepared source");
+      }
+    }
+    if ((report.axis === "claim-and-specification" || report.axis === "test-against-spec" || report.axis.startsWith("project-")) &&
+        obligations.some((obligation) => !checks.some((check) => check.obligationId === obligation.id && check.sourceId === obligation.sourceId))) {
+      throw new Error("Requirement checks must classify every explicit criterion; a source-level pass cannot cover omitted obligations");
+    }
+    if ((report.axis === "claim-and-specification" || report.axis === "test-against-spec" || report.axis.startsWith("project-")) &&
+        [...expectedSources].some((id) => !checkedSources.has(id))) {
+      throw new Error("Requirement checks must classify every prepared source, including unchanged obligations");
+    }
+  }
 }
 
 export function validateLaneCheckpointEvidenceProgress(
@@ -242,7 +308,7 @@ export function laneCheckpointPath(
   axis: ReviewAxis,
 ): string {
   const fingerprint = fingerprintSchema.parse(patchFingerprint);
-  const reviewAxis = z.enum(reviewAxes).parse(axis);
+  const reviewAxis = reviewAxisSchema.parse(axis);
   return `/tmp/known-good-review/checkpoints/${reviewExecutionRevision}/${fingerprint}/${reviewAxis}.json`;
 }
 
@@ -262,7 +328,8 @@ export async function readLaneCheckpoint(
     checkpoint.baseSha !== identity.baseSha ||
     checkpoint.headSha !== identity.headSha ||
     checkpoint.patchFingerprint !== identity.patchFingerprint ||
-    checkpoint.evidenceDigest !== identity.evidenceDigest
+    checkpoint.evidenceDigest !== identity.evidenceDigest ||
+    checkpoint.laneRegistryDigest !== identity.laneRegistryDigest
   ) {
     throw new Error("Lane checkpoint does not match the trusted review");
   }
@@ -275,12 +342,14 @@ export async function writeLaneCheckpoint(
   axis: ReviewAxis,
   content: LaneCheckpointContent,
   entryCount: number,
+  requirementIds: readonly string[] = [],
+  obligations: readonly { id: string; sourceId: string }[] = [],
 ): Promise<LaneCheckpoint> {
   const parsedContent = laneCheckpointContentSchema.parse(content);
   validateCompletedReportAxis(axis, parsedContent);
-  validateLaneCheckpointCoverage(parsedContent, entryCount);
+  validateLaneCheckpointCoverage(parsedContent, entryCount, requirementIds, obligations);
   const prior = await readLaneCheckpoint(sandbox, identity, axis);
-  if (prior) validateLaneCheckpointCoverage(prior, entryCount);
+  if (prior) validateLaneCheckpointCoverage(prior, entryCount, requirementIds, obligations);
   if (prior?.status === "complete") {
     if (
       parsedContent.status === "complete" &&
@@ -299,7 +368,7 @@ export async function writeLaneCheckpoint(
     ...parsedContent,
   });
   const serialized = `${JSON.stringify(checkpoint)}\n`;
-  if (Buffer.byteLength(serialized, "utf8") > maxCheckpointBytes) {
+  if (checkpoint.status !== "complete" && Buffer.byteLength(serialized, "utf8") > maxCheckpointBytes) {
     throw new Error("Lane checkpoint exceeds the 64 KiB limit");
   }
   await sandbox.writeTextFile({
