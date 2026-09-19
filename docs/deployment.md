@@ -15,14 +15,17 @@ four recorded finding transitions; it does not prove current model quality.
 The local build skips sandbox prewarming. Production must run `bunx eve build`
 without `--skip-sandbox-prewarm`, with permission to create sandbox templates.
 
-`vercel.json` sets the production Build Command to `bunx eve build` so a Vercel
-Git deploy can publish the Eve/Nitro output when the production
+`vercel.json` runs `bunx eve build` on production (full sandbox prewarm) and
+`bunx eve build --skip-sandbox-prewarm` on non-production Preview builds so
+Preview CI is not blocked when Sandbox template create/lookup auth fails.
+Production Git deploys still publish Eve/Nitro output when the production
 `CONVEX_DEPLOY_KEY` lacks `deployment:data:view` (Convex CLI 1.45 refuses the
 push without it). Restore the combined command
 `bunx convex deploy --cmd 'bunx eve build'` in `vercel.json` once the deploy key
 grants both `deployment:deploy` and `deployment:data:view`, or run
 `bunx convex deploy` separately when the Convex schema changes. Use a separate
-Convex deployment for ordinary previews.
+Convex deployment for ordinary previews. First production deploy of a tip that
+needs a new sandbox template still requires working Sandbox API auth.
 
 This release adds durable lifecycle, artifact and cost ledgers alongside the
 existing Convex memory schema. It does not repeat the earlier staged-memory migration. The app-first
