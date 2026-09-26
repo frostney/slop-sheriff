@@ -4,6 +4,14 @@ Project development skills were installed with the owner-maintained Skills
 CLI (`skills` 1.5.22). `skills-lock.json` records their hashes computed with the
 CLI's content-hash algorithm. Runtime review policy is authored locally.
 
+CodeRabbit does not review the development skills listed in
+`skills-lock.json`: `.coderabbit.config.ts` passes the lock (read through
+`skills-lock.yaml`, a symlink) to the shared `excludeVendoredSkills` function
+from `frostney/coderabbit` and inherits the central and web-UI settings.
+Findings on those skills belong upstream. A skill under `.agents/skills` that
+the lock does not list is project-authored and is reviewed like any other
+file.
+
 ## Slop Sheriff runtime policy
 
 `agent/instructions.ts` selects the locally authored role policy from
