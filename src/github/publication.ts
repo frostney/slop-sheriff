@@ -843,7 +843,8 @@ async function failRunningAxisChecks(
   context: CheckTarget,
   message: string,
 ): Promise<number> {
-  const concluded = await Promise.all(
+  // Attempt every axis even when one update fails, then report the failures.
+  const settled = await Promise.allSettled(
     reviewAxes.map(async (axis) => {
       const existing = await latestCheck(octokit, context, axisCheckName(axis));
       if (!existing || existing.status === "completed") return false;
@@ -863,7 +864,12 @@ async function failRunningAxisChecks(
       return true;
     }),
   );
-  return concluded.filter(Boolean).length;
+  const failures = settled.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Some review axis checks could not be concluded");
+  }
+  return settled.filter((result) => result.status === "fulfilled" && result.value).length;
 }
 
 async function retireTimelineFindingComments(
@@ -1300,9 +1306,26 @@ export async function concludeRunningChecks(input: {
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<number> {
-  const axes = await failRunningAxisChecks(input.octokit, input.context, input.message);
+  const [axes, aggregate] = await Promise.allSettled([
+    failRunningAxisChecks(input.octokit, input.context, input.message),
+    concludeRunningAggregateCheck(input),
+  ]);
+  const failures = [axes, aggregate].flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Some review checks could not be concluded");
+  }
+  return (axes.status === "fulfilled" ? axes.value : 0) +
+    (aggregate.status === "fulfilled" && aggregate.value ? 1 : 0);
+}
+
+async function concludeRunningAggregateCheck(input: {
+  readonly context: CheckTarget;
+  readonly message: string;
+  readonly octokit: OctokitClient;
+}): Promise<boolean> {
   const existing = await latestCheck(input.octokit, input.context);
-  if (!existing || existing.status === "completed") return axes;
+  if (!existing || existing.status === "completed") return false;
   await input.octokit.rest.checks.update({
     owner: input.context.owner,
     repo: input.context.repo,
@@ -1322,7 +1345,7 @@ export async function concludeRunningChecks(input: {
       ].join("\n").slice(0, 65_535),
     },
   });
-  return axes + 1;
+  return true;
 }
 
 export async function publishBudgetExhaustedCheck(input: {

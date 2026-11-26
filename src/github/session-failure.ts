@@ -14,6 +14,7 @@ export interface FailedSessionTarget {
   readonly headSha: string | null;
   readonly installationId: number | null;
   readonly owner: string;
+  readonly pullRequestNumber: number | null;
   readonly repo: string;
 }
 
@@ -52,6 +53,27 @@ export function failedSessionReason(event: FailedSessionEvent): string {
 }
 
 /**
+ * The head whose checks the failed session owns. A pull-request event seeds
+ * the channel state with its head, but a comment-triggered review starts with
+ * none until the sandbox checkout succeeds, so a session that died before the
+ * checkout takes the pull request's head. Every new review dispatch resets the
+ * previous session, so the failed session is that pull request's latest review.
+ */
+async function failedSessionHead(
+  target: FailedSessionTarget,
+  octokit: Octokit,
+): Promise<string | null> {
+  if (target.headSha !== null) return target.headSha;
+  if (target.pullRequestNumber === null) return null;
+  const pullRequest = await octokit.rest.pulls.get({
+    owner: target.owner,
+    repo: target.repo,
+    pull_number: target.pullRequestNumber,
+  });
+  return pullRequest.data.head.sha;
+}
+
+/**
  * Eve emits `session.failed` without `turn.failed` when a durable step
  * exhausts its retries, so the telemetry hook that concludes checks on
  * `turn.failed` never runs. This channel handler closes the gap: every review
@@ -66,30 +88,24 @@ export async function concludeFailedSession(input: {
 }): Promise<void> {
   const reason = failedSessionReason(input.event);
   let concluded = 0;
-  if (input.target.headSha === null || input.target.installationId === null) {
-    console.error(JSON.stringify({
-      event: "known-good-review.session_failure.checks_unresolved",
-      sessionId: input.event.sessionId,
-      missing: input.target.headSha === null ? "headSha" : "installationId",
-    }));
-  } else {
-    try {
-      concluded = await concludeRunningChecks({
-        context: {
-          headSha: input.target.headSha,
-          owner: input.target.owner,
-          repo: input.target.repo,
-        },
-        message: reason,
-        octokit: input.octokitFor(input.target.installationId),
-      });
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: "known-good-review.session_failure.checks_failed",
-        sessionId: input.event.sessionId,
-        error: error instanceof Error ? error.name : "unknown",
-      }));
+  try {
+    if (input.target.installationId === null) {
+      throw new Error("The failed session has no GitHub installation");
     }
+    const octokit = input.octokitFor(input.target.installationId);
+    const headSha = await failedSessionHead(input.target, octokit);
+    if (headSha === null) throw new Error("The failed session has no pull request head");
+    concluded = await concludeRunningChecks({
+      context: { headSha, owner: input.target.owner, repo: input.target.repo },
+      message: reason,
+      octokit,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "known-good-review.session_failure.checks_failed",
+      sessionId: input.event.sessionId,
+      error: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+    }));
   }
   console.info(JSON.stringify({
     event: "known-good-review.session_failure.concluded",

@@ -29,7 +29,7 @@ interface CheckRun {
   output?: { readonly title: string; readonly summary: string };
 }
 
-function fakeGitHub(runs: CheckRun[]) {
+function fakeGitHub(runs: CheckRun[], options: { readonly rejectUpdate?: number } = {}) {
   const updates: { id: number; body: Record<string, unknown> }[] = [];
   const octokit = new Octokit({
     request: {
@@ -41,9 +41,15 @@ function fakeGitHub(runs: CheckRun[]) {
           const matching = runs.filter((run) => run.name === name);
           return Response.json({ total_count: matching.length, check_runs: matching });
         }
+        if (method === "GET" && url.pathname === "/repos/acme/widget/pulls/7") {
+          return Response.json({ number: 7, head: { sha: "head" }, base: { sha: "base" } });
+        }
         const update = url.pathname.match(/^\/repos\/acme\/widget\/check-runs\/(\d+)$/);
         if (method === "PATCH" && update) {
           const id = Number(update[1]);
+          if (id === options.rejectUpdate) {
+            return Response.json({ message: "Validation Failed" }, { status: 422 });
+          }
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
           updates.push({ id, body });
           const run = runs.find((candidate) => candidate.id === id);
@@ -60,10 +66,16 @@ function fakeGitHub(runs: CheckRun[]) {
   return { octokit, updates };
 }
 
-const target = { headSha: "head", installationId: 1, owner: "acme", repo: "widget" };
+const target = {
+  headSha: "head",
+  installationId: 1,
+  owner: "acme",
+  pullRequestNumber: 7,
+  repo: "widget",
+};
 
-test("a session that fails after its step retries concludes every check it left running", async () => {
-  const runs: CheckRun[] = [
+function runningReviewChecks(): CheckRun[] {
+  return [
     { id: 1, name: checkName, status: "in_progress", conclusion: null },
     ...reviewAxes.map((axis, index) => ({
       id: 10 + index,
@@ -72,6 +84,10 @@ test("a session that fails after its step retries concludes every check it left 
       conclusion: null,
     })),
   ];
+}
+
+test("a session that fails after its step retries concludes every check it left running", async () => {
+  const runs = runningReviewChecks();
   const { octokit, updates } = fakeGitHub(runs);
   const comments: string[] = [];
 
@@ -94,6 +110,40 @@ test("a session that fails after its step retries concludes every check it left 
   expect(aggregate.output.summary).toContain("Error id: a24f285c-d3d0-40e6-8c10-f9ea00484130");
   expect(aggregate.output.summary).toContain("FatalError");
   expect(comments).toEqual([failedSessionReason(recordedFailure)]);
+});
+
+test("a comment-triggered review that dies before checkout concludes the pull request head's checks", async () => {
+  // Eve seeds an issue_comment session's state with no head; only a
+  // successful sandbox checkout fills it in.
+  const runs = runningReviewChecks();
+  const { octokit } = fakeGitHub(runs);
+
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target: { ...target, headSha: null },
+  });
+
+  expect(runs.every((run) => run.status === "completed" && run.conclusion === "action_required"))
+    .toBe(true);
+});
+
+test("one rejected check update does not leave the other checks running", async () => {
+  const runs = runningReviewChecks();
+  const { octokit } = fakeGitHub(runs, { rejectUpdate: 10 });
+  const comments: string[] = [];
+
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async (body) => { comments.push(body); },
+    target,
+  });
+
+  expect(runs.filter((run) => run.status !== "completed").map((run) => run.id)).toEqual([10]);
+  expect(runs[0]).toMatchObject({ status: "completed", conclusion: "action_required" });
+  expect(comments).toHaveLength(1);
 });
 
 test("a failed session never overwrites checks that already completed", async () => {
@@ -128,7 +178,7 @@ test("the failure comment is still posted when the checks cannot be reached", as
     event: recordedFailure,
     octokitFor: () => { throw new Error("unreachable"); },
     postComment: async (body) => { comments.push(body); },
-    target: { ...target, headSha: null },
+    target: { ...target, headSha: null, pullRequestNumber: null },
   });
   expect(comments).toHaveLength(2);
 });
