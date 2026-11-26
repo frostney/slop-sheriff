@@ -243,9 +243,11 @@ function checkSummary(
   ].join("\n");
 }
 
+type CheckTarget = Pick<TrustedGitHubContext, "headSha" | "owner" | "repo">;
+
 async function latestCheck(
   octokit: OctokitClient,
-  context: Omit<TrustedGitHubContext, "patchFingerprint">,
+  context: CheckTarget,
   name = checkName,
 ) {
   const names = [name, name.replace(/^slop-sheriff(?= \/|$)/, legacyCheckName)];
@@ -838,13 +840,13 @@ async function reconcileFindingComments(
 
 async function failRunningAxisChecks(
   octokit: OctokitClient,
-  context: Omit<TrustedGitHubContext, "patchFingerprint">,
+  context: CheckTarget,
   message: string,
-): Promise<void> {
-  await Promise.all(
+): Promise<number> {
+  const concluded = await Promise.all(
     reviewAxes.map(async (axis) => {
       const existing = await latestCheck(octokit, context, axisCheckName(axis));
-      if (!existing || existing.status === "completed") return;
+      if (!existing || existing.status === "completed") return false;
       await octokit.rest.checks.update({
         owner: context.owner,
         repo: context.repo,
@@ -858,8 +860,10 @@ async function failRunningAxisChecks(
           summary: message,
         },
       });
+      return true;
     }),
   );
+  return concluded.filter(Boolean).length;
 }
 
 async function retireTimelineFindingComments(
@@ -1284,6 +1288,41 @@ export async function publishFailClosedCheck(input: {
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
   );
+}
+
+/**
+ * Concludes the review checks still running on one head after the review
+ * session stopped for good, so no check waits forever. Checks that already
+ * completed keep their result: a published review is never overwritten.
+ */
+export async function concludeRunningChecks(input: {
+  readonly context: CheckTarget;
+  readonly message: string;
+  readonly octokit: OctokitClient;
+}): Promise<number> {
+  const axes = await failRunningAxisChecks(input.octokit, input.context, input.message);
+  const existing = await latestCheck(input.octokit, input.context);
+  if (!existing || existing.status === "completed") return axes;
+  await input.octokit.rest.checks.update({
+    owner: input.context.owner,
+    repo: input.context.repo,
+    check_run_id: existing.id,
+    name: existing.name,
+    status: "completed",
+    conclusion: "action_required",
+    completed_at: new Date().toISOString(),
+    output: {
+      title: "Slop Sheriff: review incomplete",
+      summary: [
+        "Policy result: **REVIEW INCOMPLETE**",
+        "",
+        "No review verdict was published.",
+        "",
+        input.message,
+      ].join("\n").slice(0, 65_535),
+    },
+  });
+  return axes + 1;
 }
 
 export async function publishBudgetExhaustedCheck(input: {

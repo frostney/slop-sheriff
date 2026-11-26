@@ -45,6 +45,7 @@ import { findingsToRevalidate } from "../../src/review/revalidation";
 import { activeReviewAxes, reviewAxes } from "../../src/review/axes";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import { withFreshReviewSessions } from "../../src/github/session-routing";
+import { concludeFailedSession } from "../../src/github/session-failure";
 import { publishPendingReview } from "../lib/publish-review";
 import { currentReviewReportState } from "../lib/review-report";
 
@@ -719,6 +720,16 @@ const channel = githubChannel({
     // product surface. Suppress the ordinary model reply so one turn cannot
     // create a second review surface.
     "message.completed": () => {},
+    // Replaces Eve's default failure comment. A durable step that exhausts
+    // its retries ends the session without `turn.failed`, so this is the
+    // only handler that sees it; it concludes the review's running checks.
+    "session.failed": (event, channel) =>
+      concludeFailedSession({
+        event,
+        octokitFor: (installationId) => githubAdapter(installationId).octokit,
+        postComment: (body) => channel.thread.post(body),
+        target: channel.state,
+      }),
   },
 });
 
