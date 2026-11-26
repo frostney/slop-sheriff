@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
-import { axisCheckName, checkName } from "../src/github/publication";
+import {
+  axisCheckName,
+  checkName,
+  publishInProgressCheck,
+  reviewAttemptOf,
+} from "../src/github/publication";
+import type { TrustedGitHubContext } from "../src/github/trusted-context";
 import { reviewAxes } from "../src/review/axes";
 import {
   concludeFailedSession,
@@ -27,7 +33,7 @@ interface CheckRun {
   readonly name: string;
   status: string;
   conclusion: string | null;
-  output?: { readonly title: string; readonly summary: string };
+  output?: { readonly title?: string; readonly summary?: string; readonly text?: string } | undefined;
 }
 
 function fakeGitHub(runs: CheckRun[], options: { readonly rejectUpdate?: number } = {}) {
@@ -56,6 +62,7 @@ function fakeGitHub(runs: CheckRun[], options: { readonly rejectUpdate?: number 
           if (run) {
             run.status = String(body.status);
             run.conclusion = (body.conclusion as string | undefined) ?? null;
+            if (body.output) run.output = body.output as CheckRun["output"];
           }
           return Response.json({ id, html_url: `https://github.com/acme/widget/runs/${id}` });
         }
@@ -71,11 +78,25 @@ const target = {
   installationId: 1,
   owner: "acme",
   repo: "widget",
+  reviewAttempt: "delivery-1",
 };
 
-function runningReviewChecks(headSha = "head", firstId = 1): CheckRun[] {
+const attemptText = (attempt: string) => `<!-- slop-sheriff:review-attempt:${attempt} -->`;
+
+function runningReviewChecks(
+  headSha = "head",
+  firstId = 1,
+  attempt: string | null = "delivery-1",
+): CheckRun[] {
   return [
-    { id: firstId, headSha, name: checkName, status: "in_progress", conclusion: null },
+    {
+      id: firstId,
+      headSha,
+      name: checkName,
+      status: "in_progress",
+      conclusion: null,
+      ...attempt === null ? {} : { output: { text: attemptText(attempt) } },
+    },
     ...reviewAxes.map((axis, index) => ({
       id: firstId + 10 + index,
       headSha,
@@ -116,7 +137,7 @@ test("a failed review concludes its own head's checks, not a newer review's on t
   // The pull request moved from head-a to head-b and a newer review created
   // its checks on head-b before the old session's failure event arrived.
   const old = runningReviewChecks("head-a", 100);
-  const newer = runningReviewChecks("head-b", 200);
+  const newer = runningReviewChecks("head-b", 200, "delivery-2");
   const { octokit } = fakeGitHub([...old, ...newer]);
 
   await concludeFailedSession({
@@ -148,9 +169,65 @@ test("one rejected check update does not leave the other checks running", async 
   expect(comments).toHaveLength(1);
 });
 
+test("a replacement review on the same head keeps the runs it took over from the failed attempt", async () => {
+  // The old attempt's checks are running when an authorized manual full review
+  // is accepted for the same commit and takes the runs over, and only then
+  // does the old session's failure event arrive.
+  const runs = runningReviewChecks("head", 1, "delivery-1");
+  const { octokit } = fakeGitHub(runs);
+  const context: TrustedGitHubContext = {
+    baseSha: "base",
+    headSha: "head",
+    installationId: 1,
+    owner: "acme",
+    pullRequest: 7,
+    repo: "widget",
+    repository: "acme/widget",
+    repositoryCreatedAt: 0,
+    repositoryId: "R_widget",
+  };
+  await publishInProgressCheck({
+    activeAxes: reviewAxes,
+    attempt: "delivery-2",
+    context,
+    octokit,
+    review: { kind: "full", reason: "manual" },
+  });
+  expect(reviewAttemptOf(runs[0]?.output?.text)).toBe("delivery-2");
+
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target: { ...target, reviewAttempt: "delivery-1" },
+  });
+  expect(runs.every((run) => run.status === "in_progress")).toBe(true);
+
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target: { ...target, reviewAttempt: "delivery-2" },
+  });
+  expect(runs.every((run) => run.status === "completed" && run.conclusion === "action_required"))
+    .toBe(true);
+});
+
+test("a session and checks from before attempts were recorded still conclude", async () => {
+  const runs = runningReviewChecks("head", 1, null);
+  const { octokit } = fakeGitHub(runs);
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target: { ...target, reviewAttempt: null },
+  });
+  expect(runs.every((run) => run.status === "completed")).toBe(true);
+});
+
 test("a failed session never overwrites checks that already completed", async () => {
   const runs: CheckRun[] = [
-    { id: 1, name: checkName, status: "completed", conclusion: "success" },
+    { id: 1, name: checkName, status: "in_progress", conclusion: null, output: { text: attemptText("delivery-1") } },
     { id: 2, name: axisCheckName("deduplication"), status: "completed", conclusion: "success" },
     { id: 3, name: axisCheckName("engineering-quality"), status: "in_progress", conclusion: null },
   ];
@@ -163,9 +240,25 @@ test("a failed session never overwrites checks that already completed", async ()
     target,
   });
 
-  expect(updates.map((update) => update.id)).toEqual([3]);
-  expect(runs[0]).toMatchObject({ status: "completed", conclusion: "success" });
+  expect(updates.map((update) => update.id).sort()).toEqual([1, 3]);
   expect(runs[1]).toMatchObject({ status: "completed", conclusion: "success" });
+});
+
+test("a published review is left as it is", async () => {
+  const runs: CheckRun[] = [
+    { id: 1, name: checkName, status: "completed", conclusion: "success", output: { text: attemptText("delivery-1") } },
+    { id: 2, name: axisCheckName("deduplication"), status: "completed", conclusion: "success" },
+  ];
+  const { octokit, updates } = fakeGitHub(runs);
+
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target,
+  });
+
+  expect(updates).toEqual([]);
 });
 
 test("the failure comment is still posted when the checks cannot be reached", async () => {

@@ -15,6 +15,8 @@ export interface FailedSessionTarget {
   readonly installationId: number | null;
   readonly owner: string;
   readonly repo: string;
+  /** The review attempt the session runs (see withAcceptedReviewState). */
+  readonly reviewAttempt: string | null;
 }
 
 function displayLimit(value: string, limit = 160): string {
@@ -70,12 +72,14 @@ export async function concludeFailedSession(input: {
     if (input.target.installationId === null) {
       throw new Error("The failed session has no GitHub installation");
     }
-    // A review session's state holds the head its checks were created on
-    // (see withAcceptedReviewHead). Another session's head may differ, so the
-    // pull request's current head is never used in its place.
+    // A review session's state holds the head its checks were created on and
+    // the attempt that owns them (see withAcceptedReviewState). Another
+    // session's head may differ, so the pull request's current head is never
+    // used in its place, and runs another attempt took over are left alone.
     const headSha = input.target.headSha;
     if (headSha === null) throw new Error("The failed session has no accepted head");
     concluded = await concludeRunningChecks({
+      attempt: input.target.reviewAttempt,
       context: { headSha, owner: input.target.owner, repo: input.target.repo },
       message: reason,
       octokit: input.octokitFor(input.target.installationId),

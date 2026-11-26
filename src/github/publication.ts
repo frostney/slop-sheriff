@@ -314,10 +314,26 @@ async function upsertCheck(
   ).data;
 }
 
+const reviewAttemptPattern = /<!-- slop-sheriff:review-attempt:([^ ]+) -->/;
+
+/** The review attempt that owns a running aggregate check, from its output. */
+export function reviewAttemptOf(text: string | null | undefined): string | null {
+  return text?.match(reviewAttemptPattern)?.[1] ?? null;
+}
+
+function reviewAttemptMarker(attempt: string): string {
+  return `<!-- slop-sheriff:review-attempt:${attempt.replace(/\s+/g, "")} -->`;
+}
+
 export async function publishInProgressCheck(input: {
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
   readonly review: ActiveReviewIdentity;
+  /**
+   * The accepted dispatch (its GitHub delivery id). A replacement review on
+   * the same head reuses the running check runs and takes them over.
+   */
+  readonly attempt?: string;
   readonly activeAxes?: readonly ReviewAxis[];
   readonly skippedAxes?: readonly ReviewAxis[];
 }): Promise<string> {
@@ -332,6 +348,7 @@ export async function publishInProgressCheck(input: {
     output: {
       title: "Slop Sheriff: review in progress",
       summary: `A ${input.review.kind} review was accepted and is currently running.`,
+      ...input.attempt ? { text: reviewAttemptMarker(input.attempt) } : {},
     },
   };
   const check = existing && existing.status !== "completed"
@@ -1298,17 +1315,28 @@ export async function publishFailClosedCheck(input: {
 
 /**
  * Concludes the review checks still running on one head after the review
- * session stopped for good, so no check waits forever. Checks that already
- * completed keep their result: a published review is never overwritten.
+ * attempt that owns them stopped for good, so no check waits forever. The
+ * running aggregate check names its owning attempt; when another attempt has
+ * taken the runs over, nothing is touched. Checks that already completed keep
+ * their result: a published review is never overwritten.
  */
 export async function concludeRunningChecks(input: {
+  readonly attempt: string | null;
   readonly context: CheckTarget;
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<number> {
+  const owner = await latestCheck(input.octokit, input.context);
+  if (
+    !owner ||
+    owner.status === "completed" ||
+    reviewAttemptOf(owner.output?.text) !== input.attempt
+  ) {
+    return 0;
+  }
   const [axes, aggregate] = await Promise.allSettled([
     failRunningAxisChecks(input.octokit, input.context, input.message),
-    concludeRunningAggregateCheck(input),
+    concludeRunningAggregateCheck({ ...input, existing: owner }),
   ]);
   const failures = [axes, aggregate].flatMap((result) =>
     result.status === "rejected" ? [result.reason] : []);
@@ -1321,11 +1349,11 @@ export async function concludeRunningChecks(input: {
 
 async function concludeRunningAggregateCheck(input: {
   readonly context: CheckTarget;
+  readonly existing: { readonly id: number; readonly name: string };
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<boolean> {
-  const existing = await latestCheck(input.octokit, input.context);
-  if (!existing || existing.status === "completed") return false;
+  const { existing } = input;
   await input.octokit.rest.checks.update({
     owner: input.context.owner,
     repo: input.context.repo,

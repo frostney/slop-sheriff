@@ -19,6 +19,8 @@ import {
   reviewControlResponse,
 } from "../src/github/manual-full";
 import {
+  reviewAttemptFromState,
+  reviewAttemptStateKey,
   startsFreshReviewSession,
   withFreshReviewSessions,
 } from "../src/github/session-routing";
@@ -220,7 +222,7 @@ describe("GitHub-owned state and telemetry", () => {
     expect(events).toEqual(["send:conversation"]);
   });
 
-  test("pins a fresh review session's channel state to the head it was accepted for", async () => {
+  test("pins a fresh review session's channel state to the review it was accepted for", async () => {
     const sent: unknown[] = [];
     const from = (() => ({
       reset: async () => ({ previousSessionId: "old-session", status: "reset" as const }),
@@ -232,7 +234,11 @@ describe("GitHub-owned state and telemetry", () => {
     const routed = withFreshReviewSessions(from);
     const accepted = (auth: SessionAuthContext): SessionAuthContext => ({
       ...auth,
-      attributes: { ...auth.attributes, [reviewContextAttributes.headSha]: "accepted" },
+      attributes: {
+        ...auth.attributes,
+        [reviewContextAttributes.headSha]: "accepted",
+        delivery_id: "delivery-1",
+      },
     });
 
     // A comment-triggered review: Eve seeds the state with no head.
@@ -252,10 +258,12 @@ describe("GitHub-owned state and telemetry", () => {
     });
 
     expect(sent).toEqual([
-      { headSha: "accepted", owner: "acme" },
-      { headSha: "accepted", owner: "acme" },
+      { headSha: "accepted", owner: "acme", [reviewAttemptStateKey]: "delivery-1" },
+      { headSha: "accepted", owner: "acme", [reviewAttemptStateKey]: "delivery-1" },
       { headSha: null, owner: "acme" },
     ]);
+    expect(reviewAttemptFromState(sent[0])).toBe("delivery-1");
+    expect(reviewAttemptFromState(sent[2])).toBeNull();
   });
 
   test("acknowledges the exact manual trigger without blocking the review", async () => {

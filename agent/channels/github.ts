@@ -44,7 +44,10 @@ import { captureMemoryAdmission, requestMemoryDeletion } from "../../src/memory/
 import { findingsToRevalidate } from "../../src/review/revalidation";
 import { activeReviewAxes, reviewAxes } from "../../src/review/axes";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
-import { withFreshReviewSessions } from "../../src/github/session-routing";
+import {
+  reviewAttemptFromState,
+  withFreshReviewSessions,
+} from "../../src/github/session-routing";
 import { concludeFailedSession } from "../../src/github/session-failure";
 import { publishPendingReview } from "../lib/publish-review";
 import { currentReviewReportState } from "../lib/review-report";
@@ -512,6 +515,7 @@ async function dispatchReview(input: {
 
   await publishInProgressCheck({
     activeAxes,
+    attempt: input.ctx.delivery.id,
     context,
     octokit,
     review:
@@ -728,7 +732,7 @@ const channel = githubChannel({
         event,
         octokitFor: (installationId) => githubAdapter(installationId).octokit,
         postComment: (body) => channel.thread.post(body),
-        target: channel.state,
+        target: { ...channel.state, reviewAttempt: reviewAttemptFromState(channel.state) },
       }),
   },
 });

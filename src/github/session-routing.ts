@@ -21,15 +21,27 @@ export function startsFreshReviewSession(
   }
 }
 
+/** Channel-state field naming the review attempt a session runs. */
+export const reviewAttemptStateKey = "slopSheriffReviewAttempt";
+
+/** The review attempt recorded in a session's channel state, if any. */
+export function reviewAttemptFromState(state: unknown): string | null {
+  if (typeof state !== "object" || state === null) return null;
+  const attempt = (state as Record<string, unknown>)[reviewAttemptStateKey];
+  return typeof attempt === "string" && attempt.length > 0 ? attempt : null;
+}
+
 /**
- * Pins the fresh review session's channel state to the head the review was
- * accepted for, which is the head its checks were created on. Eve seeds a
- * comment-triggered session with no head and fills it in only after a
- * successful sandbox checkout, and a pull-request event carries the webhook's
- * head. The failure handler needs the accepted head even when the session dies
- * before checkout, and the checkout then uses that exact commit.
+ * Pins the fresh review session's channel state to the review it was accepted
+ * for: the head its checks were created on, and the attempt (the dispatch's
+ * GitHub delivery id) that owns those checks. Eve seeds a comment-triggered
+ * session with no head and fills it in only after a successful sandbox
+ * checkout, and a pull-request event carries the webhook's head. The failure
+ * handler needs both even when the session dies before checkout, and the
+ * checkout then uses that exact commit. Eve merges this state into the
+ * session's channel state and keeps fields it does not know.
  */
-export function withAcceptedReviewHead<TState>(
+export function withAcceptedReviewState<TState>(
   options: ChannelSendOptions<TState>,
 ): ChannelSendOptions<TState> {
   const head = options.auth?.attributes[reviewContextAttributes.headSha];
@@ -40,8 +52,18 @@ export function withAcceptedReviewHead<TState>(
   if (typeof state !== "object" || state === null || !("headSha" in state)) {
     return options;
   }
-  // The channel state type is generic here; only its headSha is replaced.
-  return { ...options, state: { ...state, headSha: head } } as ChannelSendOptions<TState>;
+  const attempt = options.auth?.attributes.delivery_id;
+  // The channel state type is generic here; only these fields are replaced.
+  return {
+    ...options,
+    state: {
+      ...state,
+      headSha: head,
+      ...typeof attempt === "string" && attempt.length > 0
+        ? { [reviewAttemptStateKey]: attempt }
+        : {},
+    },
+  } as ChannelSendOptions<TState>;
 }
 
 export function withFreshReviewSessions<TState>(
@@ -63,7 +85,7 @@ export function withFreshReviewSessions<TState>(
         return from(address).send(
           message,
           freshReview
-            ? { ...withAcceptedReviewHead(options), mode: "task" }
+            ? { ...withAcceptedReviewState(options), mode: "task" }
             : options,
         );
       },
