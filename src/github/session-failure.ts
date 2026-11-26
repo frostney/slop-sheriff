@@ -14,7 +14,6 @@ export interface FailedSessionTarget {
   readonly headSha: string | null;
   readonly installationId: number | null;
   readonly owner: string;
-  readonly pullRequestNumber: number | null;
   readonly repo: string;
 }
 
@@ -53,27 +52,6 @@ export function failedSessionReason(event: FailedSessionEvent): string {
 }
 
 /**
- * The head whose checks the failed session owns. A pull-request event seeds
- * the channel state with its head, but a comment-triggered review starts with
- * none until the sandbox checkout succeeds, so a session that died before the
- * checkout takes the pull request's head. Every new review dispatch resets the
- * previous session, so the failed session is that pull request's latest review.
- */
-async function failedSessionHead(
-  target: FailedSessionTarget,
-  octokit: Octokit,
-): Promise<string | null> {
-  if (target.headSha !== null) return target.headSha;
-  if (target.pullRequestNumber === null) return null;
-  const pullRequest = await octokit.rest.pulls.get({
-    owner: target.owner,
-    repo: target.repo,
-    pull_number: target.pullRequestNumber,
-  });
-  return pullRequest.data.head.sha;
-}
-
-/**
  * Eve emits `session.failed` without `turn.failed` when a durable step
  * exhausts its retries, so the telemetry hook that concludes checks on
  * `turn.failed` never runs. This channel handler closes the gap: every review
@@ -92,13 +70,15 @@ export async function concludeFailedSession(input: {
     if (input.target.installationId === null) {
       throw new Error("The failed session has no GitHub installation");
     }
-    const octokit = input.octokitFor(input.target.installationId);
-    const headSha = await failedSessionHead(input.target, octokit);
-    if (headSha === null) throw new Error("The failed session has no pull request head");
+    // A review session's state holds the head its checks were created on
+    // (see withAcceptedReviewHead). Another session's head may differ, so the
+    // pull request's current head is never used in its place.
+    const headSha = input.target.headSha;
+    if (headSha === null) throw new Error("The failed session has no accepted head");
     concluded = await concludeRunningChecks({
       context: { headSha, owner: input.target.owner, repo: input.target.repo },
       message: reason,
-      octokit,
+      octokit: input.octokitFor(input.target.installationId),
     });
   } catch (error) {
     console.error(JSON.stringify({

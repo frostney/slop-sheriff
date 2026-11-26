@@ -23,6 +23,7 @@ const recordedFailure: FailedSessionEvent = {
 
 interface CheckRun {
   readonly id: number;
+  readonly headSha?: string;
   readonly name: string;
   status: string;
   conclusion: string | null;
@@ -36,13 +37,12 @@ function fakeGitHub(runs: CheckRun[], options: { readonly rejectUpdate?: number 
       fetch: async (resource: Request | string | URL, init?: RequestInit) => {
         const url = new URL(String(resource));
         const method = init?.method ?? "GET";
-        if (method === "GET" && url.pathname === "/repos/acme/widget/commits/head/check-runs") {
+        const listed = url.pathname.match(/^\/repos\/acme\/widget\/commits\/([^/]+)\/check-runs$/);
+        if (method === "GET" && listed) {
           const name = url.searchParams.get("check_name");
-          const matching = runs.filter((run) => run.name === name);
+          const matching = runs.filter((run) =>
+            run.name === name && (run.headSha ?? "head") === listed[1]);
           return Response.json({ total_count: matching.length, check_runs: matching });
-        }
-        if (method === "GET" && url.pathname === "/repos/acme/widget/pulls/7") {
-          return Response.json({ number: 7, head: { sha: "head" }, base: { sha: "base" } });
         }
         const update = url.pathname.match(/^\/repos\/acme\/widget\/check-runs\/(\d+)$/);
         if (method === "PATCH" && update) {
@@ -70,15 +70,15 @@ const target = {
   headSha: "head",
   installationId: 1,
   owner: "acme",
-  pullRequestNumber: 7,
   repo: "widget",
 };
 
-function runningReviewChecks(): CheckRun[] {
+function runningReviewChecks(headSha = "head", firstId = 1): CheckRun[] {
   return [
-    { id: 1, name: checkName, status: "in_progress", conclusion: null },
+    { id: firstId, headSha, name: checkName, status: "in_progress", conclusion: null },
     ...reviewAxes.map((axis, index) => ({
-      id: 10 + index,
+      id: firstId + 10 + index,
+      headSha,
       name: axisCheckName(axis),
       status: "in_progress",
       conclusion: null,
@@ -112,26 +112,28 @@ test("a session that fails after its step retries concludes every check it left 
   expect(comments).toEqual([failedSessionReason(recordedFailure)]);
 });
 
-test("a comment-triggered review that dies before checkout concludes the pull request head's checks", async () => {
-  // Eve seeds an issue_comment session's state with no head; only a
-  // successful sandbox checkout fills it in.
-  const runs = runningReviewChecks();
-  const { octokit } = fakeGitHub(runs);
+test("a failed review concludes its own head's checks, not a newer review's on the advanced head", async () => {
+  // The pull request moved from head-a to head-b and a newer review created
+  // its checks on head-b before the old session's failure event arrived.
+  const old = runningReviewChecks("head-a", 100);
+  const newer = runningReviewChecks("head-b", 200);
+  const { octokit } = fakeGitHub([...old, ...newer]);
 
   await concludeFailedSession({
     event: recordedFailure,
     octokitFor: () => octokit,
     postComment: async () => {},
-    target: { ...target, headSha: null },
+    target: { ...target, headSha: "head-a" },
   });
 
-  expect(runs.every((run) => run.status === "completed" && run.conclusion === "action_required"))
+  expect(old.every((run) => run.status === "completed" && run.conclusion === "action_required"))
     .toBe(true);
+  expect(newer.every((run) => run.status === "in_progress")).toBe(true);
 });
 
 test("one rejected check update does not leave the other checks running", async () => {
   const runs = runningReviewChecks();
-  const { octokit } = fakeGitHub(runs, { rejectUpdate: 10 });
+  const { octokit } = fakeGitHub(runs, { rejectUpdate: 11 });
   const comments: string[] = [];
 
   await concludeFailedSession({
@@ -141,7 +143,7 @@ test("one rejected check update does not leave the other checks running", async 
     target,
   });
 
-  expect(runs.filter((run) => run.status !== "completed").map((run) => run.id)).toEqual([10]);
+  expect(runs.filter((run) => run.status !== "completed").map((run) => run.id)).toEqual([11]);
   expect(runs[0]).toMatchObject({ status: "completed", conclusion: "action_required" });
   expect(comments).toHaveLength(1);
 });
@@ -178,7 +180,7 @@ test("the failure comment is still posted when the checks cannot be reached", as
     event: recordedFailure,
     octokitFor: () => { throw new Error("unreachable"); },
     postComment: async (body) => { comments.push(body); },
-    target: { ...target, headSha: null, pullRequestNumber: null },
+    target: { ...target, headSha: null },
   });
   expect(comments).toHaveLength(2);
 });

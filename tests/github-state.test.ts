@@ -220,6 +220,44 @@ describe("GitHub-owned state and telemetry", () => {
     expect(events).toEqual(["send:conversation"]);
   });
 
+  test("pins a fresh review session's channel state to the head it was accepted for", async () => {
+    const sent: unknown[] = [];
+    const from = (() => ({
+      reset: async () => ({ previousSessionId: "old-session", status: "reset" as const }),
+      send: async (_message: unknown, options: { readonly state?: unknown }) => {
+        sent.push(options.state);
+        return {} as Session;
+      },
+    })) as unknown as ChannelFrom<{ headSha: string | null; owner: string }>;
+    const routed = withFreshReviewSessions(from);
+    const accepted = (auth: SessionAuthContext): SessionAuthContext => ({
+      ...auth,
+      attributes: { ...auth.attributes, [reviewContextAttributes.headSha]: "accepted" },
+    });
+
+    // A comment-triggered review: Eve seeds the state with no head.
+    await routed("repo:1:pull:53").send("review", {
+      auth: accepted(reviewAuth("full", "issue_comment")),
+      state: { headSha: null, owner: "acme" },
+    });
+    // A pull-request event carries the webhook's head, which can lag.
+    await routed("repo:1:pull:53").send("review", {
+      auth: accepted(reviewAuth("delta")),
+      state: { headSha: "webhook", owner: "acme" },
+    });
+    // A control response continues the existing session unchanged.
+    await routed("repo:1:pull:53").send("Approve", {
+      auth: accepted(reviewAuth("full", "review-control-response")),
+      state: { headSha: null, owner: "acme" },
+    });
+
+    expect(sent).toEqual([
+      { headSha: "accepted", owner: "acme" },
+      { headSha: "accepted", owner: "acme" },
+      { headSha: null, owner: "acme" },
+    ]);
+  });
+
   test("acknowledges the exact manual trigger without blocking the review", async () => {
     const reactions: string[] = [];
     expect(
