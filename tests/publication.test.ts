@@ -1025,9 +1025,16 @@ describe("GitHub publication lifecycle", () => {
     });
   });
 
-  test.each(["COMMENTED", "PENDING"] as const)(
-    "a review submission GitHub rejects is published only if GitHub shows it %s",
-    async (stateAfterError) => {
+  test.each([
+    { blocking: false, important: true, state: "COMMENTED", published: true },
+    { blocking: true, important: true, state: "CHANGES_REQUESTED", published: true },
+    { blocking: true, important: false, state: "APPROVED", published: true },
+    { blocking: true, important: true, state: "COMMENTED", published: false },
+    { blocking: true, important: false, state: "DISMISSED", published: false },
+    { blocking: false, important: true, state: "PENDING", published: false },
+  ] as const)(
+    "a rejected submission (blocking: $blocking) GitHub shows as $state counts as published: $published",
+    async ({ blocking, important, state: stateAfterError, published: expectPublished }) => {
       // Recorded on 28 Nov 2026: GitHub answered the submission with HTTP 500
       // after it took effect, and the pending-review cleanup then failed.
       const requests: CapturedRequest[] = [];
@@ -1066,6 +1073,9 @@ describe("GitHub publication lifecycle", () => {
                 ? json({ id: 101, state: "PENDING" })
                 : json({ message: "Can not delete a non-pending pull request review" }, 422);
             }
+            if (method === "PATCH" && url.pathname.includes("/check-runs/")) {
+              return json({ id: 300, name: "slop-sheriff", html_url: "https://github.com/acme/widget/runs/300" });
+            }
             if (method === "POST" && url.pathname === "/graphql") {
               const operation = graphqlOperation(body);
               if (operation.includes("KnownGoodReviewAddReviewThread")) {
@@ -1088,22 +1098,33 @@ describe("GitHub publication lifecycle", () => {
         },
       });
 
-      const published = publishReview({ context: context(), octokit, report: report() });
+      const reviewed = report();
+      if (!important) reviewed.findings[0]!.severity = "IMPROVEMENT";
+      const published = publishReview({
+        config: { blocking, profile: "thorough" },
+        context: context(),
+        octokit,
+        report: reviewed,
+      });
       const deleted = () => requests.some((request) =>
         request.method === "DELETE" && request.path.endsWith("/pulls/7/reviews/101"));
       const stateWritten = () => requests.some((request) =>
         request.method === "POST" &&
         request.path.endsWith("/issues/7/comments") &&
         JSON.stringify(request.body).includes("known-good-review:state"));
-      if (stateAfterError === "COMMENTED") {
+      if (expectPublished) {
         await published;
         expect(deleted()).toBeFalse();
         expect(stateWritten()).toBeTrue();
       } else {
         await expect(published).rejects.toThrow();
-        expect(deleted()).toBeTrue();
         expect(stateWritten()).toBeFalse();
       }
+      const submitted = requests.find((request) =>
+        request.method === "POST" && request.path.endsWith("/pulls/7/reviews/101/events"));
+      expect(submitted?.body).toMatchObject({
+        event: blocking ? (important ? "REQUEST_CHANGES" : "APPROVE") : "COMMENT",
+      });
     },
   );
 
