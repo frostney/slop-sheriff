@@ -19,6 +19,8 @@ import {
   reviewControlResponse,
 } from "../src/github/manual-full";
 import {
+  reviewAttemptFromState,
+  reviewAttemptStateKey,
   startsFreshReviewSession,
   withFreshReviewSessions,
 } from "../src/github/session-routing";
@@ -218,6 +220,50 @@ describe("GitHub-owned state and telemetry", () => {
       auth: reviewAuth("full", "review-control-response"),
     });
     expect(events).toEqual(["send:conversation"]);
+  });
+
+  test("pins a fresh review session's channel state to the review it was accepted for", async () => {
+    const sent: unknown[] = [];
+    const from = (() => ({
+      reset: async () => ({ previousSessionId: "old-session", status: "reset" as const }),
+      send: async (_message: unknown, options: { readonly state?: unknown }) => {
+        sent.push(options.state);
+        return {} as Session;
+      },
+    })) as unknown as ChannelFrom<{ headSha: string | null; owner: string }>;
+    const routed = withFreshReviewSessions(from);
+    const accepted = (auth: SessionAuthContext): SessionAuthContext => ({
+      ...auth,
+      attributes: {
+        ...auth.attributes,
+        [reviewContextAttributes.headSha]: "accepted",
+        delivery_id: "delivery-1",
+      },
+    });
+
+    // A comment-triggered review: Eve seeds the state with no head.
+    await routed("repo:1:pull:53").send("review", {
+      auth: accepted(reviewAuth("full", "issue_comment")),
+      state: { headSha: null, owner: "acme" },
+    });
+    // A pull-request event carries the webhook's head, which can lag.
+    await routed("repo:1:pull:53").send("review", {
+      auth: accepted(reviewAuth("delta")),
+      state: { headSha: "webhook", owner: "acme" },
+    });
+    // A control response continues the existing session unchanged.
+    await routed("repo:1:pull:53").send("Approve", {
+      auth: accepted(reviewAuth("full", "review-control-response")),
+      state: { headSha: null, owner: "acme" },
+    });
+
+    expect(sent).toEqual([
+      { headSha: "accepted", owner: "acme", [reviewAttemptStateKey]: "delivery-1" },
+      { headSha: "accepted", owner: "acme", [reviewAttemptStateKey]: "delivery-1" },
+      { headSha: null, owner: "acme" },
+    ]);
+    expect(reviewAttemptFromState(sent[0])).toBe("delivery-1");
+    expect(reviewAttemptFromState(sent[2])).toBeNull();
   });
 
   test("acknowledges the exact manual trigger without blocking the review", async () => {

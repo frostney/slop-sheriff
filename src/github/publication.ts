@@ -288,9 +288,11 @@ async function reviewWasSubmitted(
   return false;
 }
 
+type CheckTarget = Pick<TrustedGitHubContext, "headSha" | "owner" | "repo">;
+
 async function latestCheck(
   octokit: OctokitClient,
-  context: Omit<TrustedGitHubContext, "patchFingerprint">,
+  context: CheckTarget,
   name = checkName,
 ) {
   const names = [name, name.replace(/^slop-sheriff(?= \/|$)/, legacyCheckName)];
@@ -357,10 +359,26 @@ async function upsertCheck(
   ).data;
 }
 
+const reviewAttemptPattern = /<!-- slop-sheriff:review-attempt:([^ ]+) -->/;
+
+/** The review attempt that owns a running aggregate check, from its output. */
+export function reviewAttemptOf(text: string | null | undefined): string | null {
+  return text?.match(reviewAttemptPattern)?.[1] ?? null;
+}
+
+function reviewAttemptMarker(attempt: string): string {
+  return `<!-- slop-sheriff:review-attempt:${attempt.replace(/\s+/g, "")} -->`;
+}
+
 export async function publishInProgressCheck(input: {
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
   readonly review: ActiveReviewIdentity;
+  /**
+   * The accepted dispatch (its GitHub delivery id). A replacement review on
+   * the same head reuses the running check runs and takes them over.
+   */
+  readonly attempt?: string | null;
   readonly activeAxes?: readonly ReviewAxis[];
   readonly skippedAxes?: readonly ReviewAxis[];
 }): Promise<string> {
@@ -375,6 +393,7 @@ export async function publishInProgressCheck(input: {
     output: {
       title: "Slop Sheriff: review in progress",
       summary: `A ${input.review.kind} review was accepted and is currently running.`,
+      ...input.attempt ? { text: reviewAttemptMarker(input.attempt) } : {},
     },
   };
   const check = existing && existing.status !== "completed"
@@ -893,16 +912,26 @@ async function reconcileFindingComments(
   };
 }
 
+/** Runs a GitHub write once more when its first attempt is rejected. */
+async function withOneRetry<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch {
+    return await write();
+  }
+}
+
 async function failRunningAxisChecks(
   octokit: OctokitClient,
-  context: Omit<TrustedGitHubContext, "patchFingerprint">,
+  context: CheckTarget,
   message: string,
-): Promise<void> {
-  await Promise.all(
+): Promise<number> {
+  // Attempt every axis even when one update fails, then report the failures.
+  const settled = await Promise.allSettled(
     reviewAxes.map(async (axis) => {
       const existing = await latestCheck(octokit, context, axisCheckName(axis));
-      if (!existing || existing.status === "completed") return;
-      await octokit.rest.checks.update({
+      if (!existing || existing.status === "completed") return false;
+      await withOneRetry(() => octokit.rest.checks.update({
         owner: context.owner,
         repo: context.repo,
         check_run_id: existing.id,
@@ -914,9 +943,16 @@ async function failRunningAxisChecks(
           title: `${axis}: incomplete`,
           summary: message,
         },
-      });
+      }));
+      return true;
     }),
   );
+  const failures = settled.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Some review axis checks could not be concluded");
+  }
+  return settled.filter((result) => result.status === "fulfilled" && result.value).length;
 }
 
 async function retireTimelineFindingComments(
@@ -1341,6 +1377,73 @@ export async function publishFailClosedCheck(input: {
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
   );
+}
+
+/**
+ * Concludes the review checks still running on one head after the review
+ * attempt that owns them stopped for good, so no check waits forever. The
+ * running aggregate check names its owning attempt; when another attempt has
+ * taken the runs over, nothing is touched. Checks that already completed keep
+ * their result: a published review is never overwritten.
+ */
+export async function concludeRunningChecks(input: {
+  readonly attempt: string | null;
+  readonly context: CheckTarget;
+  readonly message: string;
+  readonly octokit: OctokitClient;
+}): Promise<number> {
+  const owner = await latestCheck(input.octokit, input.context);
+  // The attempt still owns the runs while its aggregate is running, and after
+  // it concluded the aggregate as incomplete itself (the marker is kept), so a
+  // second pass can still reach an axis whose first update was rejected.
+  const owned = owner !== undefined &&
+    reviewAttemptOf(owner.output?.text) === input.attempt &&
+    (owner.status !== "completed" || owner.conclusion === "action_required");
+  if (!owned) return 0;
+  const [axes, aggregate] = await Promise.allSettled([
+    failRunningAxisChecks(input.octokit, input.context, input.message),
+    owner.status === "completed"
+      ? Promise.resolve(false)
+      : concludeRunningAggregateCheck({ ...input, existing: owner }),
+  ]);
+  const failures = [axes, aggregate].flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Some review checks could not be concluded");
+  }
+  return (axes.status === "fulfilled" ? axes.value : 0) +
+    (aggregate.status === "fulfilled" && aggregate.value ? 1 : 0);
+}
+
+async function concludeRunningAggregateCheck(input: {
+  readonly attempt: string | null;
+  readonly context: CheckTarget;
+  readonly existing: { readonly id: number; readonly name: string };
+  readonly message: string;
+  readonly octokit: OctokitClient;
+}): Promise<boolean> {
+  const { existing } = input;
+  await withOneRetry(() => input.octokit.rest.checks.update({
+    owner: input.context.owner,
+    repo: input.context.repo,
+    check_run_id: existing.id,
+    name: existing.name,
+    status: "completed",
+    conclusion: "action_required",
+    completed_at: new Date().toISOString(),
+    output: {
+      title: "Slop Sheriff: review incomplete",
+      summary: [
+        "Policy result: **REVIEW INCOMPLETE**",
+        "",
+        "No review verdict was published.",
+        "",
+        input.message,
+      ].join("\n").slice(0, 65_535),
+      ...input.attempt === null ? {} : { text: reviewAttemptMarker(input.attempt) },
+    },
+  }));
+  return true;
 }
 
 export async function publishBudgetExhaustedCheck(input: {

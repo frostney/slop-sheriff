@@ -26,16 +26,25 @@ export function renderPlainText(value: string): string {
   return escapeHtml(value).replace(/[\\`*_{}\[\]()#+.!|~-]/g, "\\$&");
 }
 
-/** Bound legacy excerpts without cutting surrogate pairs or combining sequences. */
-export function findingImpactSummary(finding: Pick<ReviewFinding, "impact" | "impactSummary">): string {
-  const source = (finding.impactSummary ?? finding.impact).replace(/\s+/gu, " ").trim();
-  if (source.length <= 300) return source;
+/**
+ * Collapses whitespace and bounds the text to `limit` UTF-16 code units,
+ * ending a shortened text with "…" and never cutting a surrogate pair or a
+ * combining sequence.
+ */
+export function boundedText(value: string, limit: number): string {
+  const source = value.replace(/\s+/gu, " ").trim();
+  if (source.length <= limit) return source;
   let excerpt = "";
   for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(source)) {
-    if (excerpt.length + segment.length > 299) break;
+    if (excerpt.length + segment.length > limit - 1) break;
     excerpt += segment;
   }
   return `${excerpt.trimEnd()}…`;
+}
+
+/** Bound legacy excerpts without cutting surrogate pairs or combining sequences. */
+export function findingImpactSummary(finding: Pick<ReviewFinding, "impact" | "impactSummary">): string {
+  return boundedText(finding.impactSummary ?? finding.impact, 300);
 }
 
 function codeFence(value: string): string {
