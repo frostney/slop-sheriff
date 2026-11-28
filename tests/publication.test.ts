@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import { z } from "zod";
 import {
@@ -861,6 +861,9 @@ describe("GitHub publication lifecycle", () => {
             }
             throw new Error(`Unexpected GraphQL operation: ${operation}`);
           }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+            return json({ id: 101, state: "PENDING" });
+          }
           if (
             method === "DELETE" &&
             url.pathname.endsWith("/pulls/7/reviews/101")
@@ -872,16 +875,15 @@ describe("GitHub publication lifecycle", () => {
       },
     });
 
-    expect(
+    await expect(
       publishReview({ context: context(), octokit, report: report() }),
     ).rejects.toThrow("native thread creation failed");
-    expect(
-      requests.some(
-        (request) =>
-          request.method === "DELETE" &&
-          request.path.endsWith("/pulls/7/reviews/101"),
-      ),
-    ).toBeTrue();
+    const read = requests.findIndex((request) =>
+      request.method === "GET" && request.path.endsWith("/pulls/7/reviews/101"));
+    const deletion = requests.findIndex((request) =>
+      request.method === "DELETE" && request.path.endsWith("/pulls/7/reviews/101"));
+    expect(read).toBeGreaterThan(-1);
+    expect(deletion).toBeGreaterThan(read);
     expect(
       requests.some(
         (request) =>
@@ -1131,8 +1133,15 @@ describe("GitHub publication lifecycle", () => {
     },
   );
 
-  test("a submission check retries one failed read before giving up", async () => {
+  test.each([
+    { failedReads: 1, published: true },
+    { failedReads: 2, published: false },
+  ])("a submission check with $failedReads failed read(s) counts as published: $published", async ({ failedReads, published }) => {
     let reads = 0;
+    const warnings: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
     const requests: string[] = [];
     const octokit = new Octokit({
       auth: "test-token",
@@ -1162,7 +1171,12 @@ describe("GitHub publication lifecycle", () => {
           }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews/101")) {
             reads += 1;
-            return reads === 1 ? json({ message: "Server Error" }, 502) : json({ id: 101, state: "COMMENTED" });
+            return reads <= failedReads
+              ? json({ message: "Server Error" }, 502)
+              : json({ id: 101, state: "COMMENTED" });
+          }
+          if (method === "DELETE" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+            return json({ id: 101, state: "PENDING" });
           }
           if (method === "POST" && url.pathname === "/graphql") {
             return json({ data: { addPullRequestReviewThread: { thread: { id: "PRRT_202" } } } });
@@ -1180,10 +1194,20 @@ describe("GitHub publication lifecycle", () => {
       },
     });
 
-    await publishReview({ context: context(), octokit, report: report() });
+    try {
+      const publication = publishReview({ context: context(), octokit, report: report() });
+      if (published) await publication;
+      else await expect(publication).rejects.toThrow();
+    } finally {
+      warn.mockRestore();
+    }
 
     expect(reads).toBe(2);
-    expect(requests).not.toContain("DELETE /repos/acme/widget/pulls/7/reviews/101");
+    expect(requests.includes("DELETE /repos/acme/widget/pulls/7/reviews/101")).toBe(!published);
+    const events = warnings.map((warning) => (JSON.parse(warning) as { event: string }).event);
+    expect(events.filter((event) => event === "known-good-review.publication.submission_check_failed"))
+      .toHaveLength(failedReads);
+    expect(events.includes("known-good-review.publication.submission_recovered")).toBe(published);
   });
 
   test("replies to and resolves a fixed finding without reposting it", async () => {

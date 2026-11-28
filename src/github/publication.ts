@@ -245,6 +245,8 @@ function checkSummary(
 
 type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
 
+const submissionRecheckDelayMs = 250;
+
 /** The review state GitHub shows once each submission event took effect. */
 const submittedReviewState = {
   APPROVE: "APPROVED",
@@ -263,9 +265,10 @@ async function reviewWasSubmitted(
   reviewId: number,
   event: ReviewEvent,
 ): Promise<boolean> {
-  // Read twice: the same API that just answered with an error may also lag
-  // or fail once on the read that follows it.
+  // Read twice, the second time after a short pause: the same API that just
+  // answered with an error may also lag or fail once on the read after it.
   for (let read = 1; read <= 2; read += 1) {
+    if (read > 1) await new Promise((resolve) => setTimeout(resolve, submissionRecheckDelayMs));
     try {
       const review = await octokit.rest.pulls.getReview({
         owner: context.owner,
@@ -670,7 +673,14 @@ async function createReviewThreads(
     // GitHub can answer a submission with an error after it took effect (an
     // HTTP 500 on 28 Nov 2026 left a submitted review behind). A review that
     // is no longer pending was published, so publication carries on.
-    if (await reviewWasSubmitted(octokit, context, created.data.id, requestedEvent)) return;
+    if (await reviewWasSubmitted(octokit, context, created.data.id, requestedEvent)) {
+      console.warn(JSON.stringify({
+        event: "known-good-review.publication.submission_recovered",
+        error: error instanceof Error ? error.name : "unknown",
+        state: submittedReviewState[requestedEvent],
+      }));
+      return;
+    }
     try {
       await octokit.rest.pulls.deletePendingReview({
         owner: context.owner,
