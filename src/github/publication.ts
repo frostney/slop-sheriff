@@ -263,17 +263,26 @@ async function reviewWasSubmitted(
   reviewId: number,
   event: ReviewEvent,
 ): Promise<boolean> {
-  try {
-    const review = await octokit.rest.pulls.getReview({
-      owner: context.owner,
-      repo: context.repo,
-      pull_number: context.pullRequest,
-      review_id: reviewId,
-    });
-    return review.data.state === submittedReviewState[event];
-  } catch {
-    return false;
+  // Read twice: the same API that just answered with an error may also lag
+  // or fail once on the read that follows it.
+  for (let read = 1; read <= 2; read += 1) {
+    try {
+      const review = await octokit.rest.pulls.getReview({
+        owner: context.owner,
+        repo: context.repo,
+        pull_number: context.pullRequest,
+        review_id: reviewId,
+      });
+      if (review.data.state === submittedReviewState[event]) return true;
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "known-good-review.publication.submission_check_failed",
+        read,
+        error: error instanceof Error ? error.name : "unknown",
+      }));
+    }
   }
+  return false;
 }
 
 async function latestCheck(
