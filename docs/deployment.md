@@ -15,6 +15,15 @@ four recorded finding transitions; it does not prove current model quality.
 The local build skips sandbox prewarming. Production must run `bunx eve build`
 without `--skip-sandbox-prewarm`, with permission to create sandbox templates.
 
+A deployed runtime opens every review sandbox from that prewarmed template and
+cannot rebuild it. `agent/sandbox.ts` therefore keeps the template's Vercel
+record persistent and its snapshot from expiring; review sessions keep the
+provider's default expiration. Templates from earlier template keys are not
+removed automatically. A review that fails with
+`SandboxTemplateNotProvisionedError` needs a production redeploy; if the
+redeploy's build log reports the template as reused and reviews still fail,
+remove the `eve-sbx-tpl-vercel-*` sandbox the error names and redeploy again.
+
 `vercel.json` sets the production Build Command to `bunx eve build` so a Vercel
 Git deploy can publish the Eve/Nitro output when the production
 `CONVEX_DEPLOY_KEY` lacks `deployment:data:view` (Convex CLI 1.45 refuses the
