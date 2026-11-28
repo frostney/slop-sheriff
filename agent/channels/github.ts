@@ -45,6 +45,7 @@ import { findingsToRevalidate } from "../../src/review/revalidation";
 import { activeReviewAxes, reviewAxes } from "../../src/review/axes";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import {
+  reviewAttemptFromAuth,
   reviewAttemptFromState,
   withFreshReviewSessions,
 } from "../../src/github/session-routing";
@@ -515,7 +516,7 @@ async function dispatchReview(input: {
 
   await publishInProgressCheck({
     activeAxes,
-    attempt: input.ctx.delivery.id,
+    attempt: reviewAttemptFromAuth(defaultGitHubAuth(input.ctx)),
     context,
     octokit,
     review:
@@ -726,7 +727,8 @@ const channel = githubChannel({
     "message.completed": () => {},
     // Replaces Eve's default failure comment. A durable step that exhausts
     // its retries ends the session without `turn.failed`, so this is the
-    // only handler that sees it; it concludes the review's running checks.
+    // only handler that sees it; it tries to conclude the running checks its
+    // review attempt owns, then posts the failure comment.
     "session.failed": (event, channel) =>
       concludeFailedSession({
         event,

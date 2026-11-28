@@ -36,7 +36,10 @@ interface CheckRun {
   output?: { readonly title?: string; readonly summary?: string; readonly text?: string } | undefined;
 }
 
-function fakeGitHub(runs: CheckRun[], options: { readonly rejectUpdate?: number } = {}) {
+function fakeGitHub(
+  runs: CheckRun[],
+  options: { readonly rejectUpdate?: number; rejections?: number } = {},
+) {
   const updates: { id: number; body: Record<string, unknown> }[] = [];
   const octokit = new Octokit({
     request: {
@@ -53,7 +56,8 @@ function fakeGitHub(runs: CheckRun[], options: { readonly rejectUpdate?: number 
         const update = url.pathname.match(/^\/repos\/acme\/widget\/check-runs\/(\d+)$/);
         if (method === "PATCH" && update) {
           const id = Number(update[1]);
-          if (id === options.rejectUpdate) {
+          if (id === options.rejectUpdate && (options.rejections ?? Infinity) > 0) {
+            if (options.rejections !== undefined) options.rejections -= 1;
             return Response.json({ message: "Validation Failed" }, { status: 422 });
           }
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -225,6 +229,42 @@ test("a session and checks from before attempts were recorded still conclude", a
   expect(runs.every((run) => run.status === "completed")).toBe(true);
 });
 
+test("a transiently rejected check update is retried in the same pass", async () => {
+  const runs = runningReviewChecks();
+  const { octokit } = fakeGitHub(runs, { rejectUpdate: 11, rejections: 1 });
+
+  await concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target,
+  });
+
+  expect(runs.every((run) => run.status === "completed" && run.conclusion === "action_required"))
+    .toBe(true);
+});
+
+test("a second pass by the same attempt reaches an axis whose updates were all rejected", async () => {
+  const runs = runningReviewChecks();
+  const options: { readonly rejectUpdate: number; rejections: number } = { rejectUpdate: 11, rejections: 2 };
+  const { octokit, updates } = fakeGitHub(runs, options);
+  const fail = () => concludeFailedSession({
+    event: recordedFailure,
+    octokitFor: () => octokit,
+    postComment: async () => {},
+    target,
+  });
+
+  await fail();
+  expect(runs.filter((run) => run.status !== "completed").map((run) => run.id)).toEqual([11]);
+  expect(reviewAttemptOf(runs[0]?.output?.text)).toBe("delivery-1");
+  const aggregateUpdates = updates.filter((update) => update.id === 1).length;
+
+  await fail();
+  expect(runs.every((run) => run.status === "completed")).toBe(true);
+  expect(updates.filter((update) => update.id === 1)).toHaveLength(aggregateUpdates);
+});
+
 test("a failed session never overwrites checks that already completed", async () => {
   const runs: CheckRun[] = [
     { id: 1, name: checkName, status: "in_progress", conclusion: null, output: { text: attemptText("delivery-1") } },
@@ -285,4 +325,24 @@ test("the recorded reason shows no more of the error than Eve's own comment did"
   expect(reason).toContain("`@slop-sheriff full review`");
   expect(failedSessionReason({ code: "WORKFLOW_FAILED", message: "", sessionId: "s" }))
     .toContain("(WORKFLOW_FAILED).");
+});
+
+test("every field of the reason is bounded, so the comment and summaries always fit", () => {
+  const huge = "x".repeat(70_000);
+  for (const event of [
+    { code: huge, message: huge, sessionId: "s" },
+    { code: "C", details: { errorId: huge, name: huge }, message: huge, sessionId: "s" },
+  ]) {
+    expect(failedSessionReason(event).length).toBeLessThan(600);
+  }
+});
+
+test("the message excerpt never splits a character at its bound", () => {
+  const reason = failedSessionReason({
+    code: "FatalError",
+    message: `${"a".repeat(158)}👩‍👩‍👧 then more`,
+    sessionId: "s",
+  });
+  expect(reason).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  expect(reason).toContain(`${"a".repeat(158)}…`);
 });

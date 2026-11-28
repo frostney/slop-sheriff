@@ -333,7 +333,7 @@ export async function publishInProgressCheck(input: {
    * The accepted dispatch (its GitHub delivery id). A replacement review on
    * the same head reuses the running check runs and takes them over.
    */
-  readonly attempt?: string;
+  readonly attempt?: string | null;
   readonly activeAxes?: readonly ReviewAxis[];
   readonly skippedAxes?: readonly ReviewAxis[];
 }): Promise<string> {
@@ -855,6 +855,15 @@ async function reconcileFindingComments(
   };
 }
 
+/** Runs a GitHub write once more when its first attempt is rejected. */
+async function withOneRetry<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch {
+    return await write();
+  }
+}
+
 async function failRunningAxisChecks(
   octokit: OctokitClient,
   context: CheckTarget,
@@ -865,7 +874,7 @@ async function failRunningAxisChecks(
     reviewAxes.map(async (axis) => {
       const existing = await latestCheck(octokit, context, axisCheckName(axis));
       if (!existing || existing.status === "completed") return false;
-      await octokit.rest.checks.update({
+      await withOneRetry(() => octokit.rest.checks.update({
         owner: context.owner,
         repo: context.repo,
         check_run_id: existing.id,
@@ -877,7 +886,7 @@ async function failRunningAxisChecks(
           title: `${axis}: incomplete`,
           summary: message,
         },
-      });
+      }));
       return true;
     }),
   );
@@ -1327,16 +1336,18 @@ export async function concludeRunningChecks(input: {
   readonly octokit: OctokitClient;
 }): Promise<number> {
   const owner = await latestCheck(input.octokit, input.context);
-  if (
-    !owner ||
-    owner.status === "completed" ||
-    reviewAttemptOf(owner.output?.text) !== input.attempt
-  ) {
-    return 0;
-  }
+  // The attempt still owns the runs while its aggregate is running, and after
+  // it concluded the aggregate as incomplete itself (the marker is kept), so a
+  // second pass can still reach an axis whose first update was rejected.
+  const owned = owner !== undefined &&
+    reviewAttemptOf(owner.output?.text) === input.attempt &&
+    (owner.status !== "completed" || owner.conclusion === "action_required");
+  if (!owned) return 0;
   const [axes, aggregate] = await Promise.allSettled([
     failRunningAxisChecks(input.octokit, input.context, input.message),
-    concludeRunningAggregateCheck({ ...input, existing: owner }),
+    owner.status === "completed"
+      ? Promise.resolve(false)
+      : concludeRunningAggregateCheck({ ...input, existing: owner }),
   ]);
   const failures = [axes, aggregate].flatMap((result) =>
     result.status === "rejected" ? [result.reason] : []);
@@ -1348,13 +1359,14 @@ export async function concludeRunningChecks(input: {
 }
 
 async function concludeRunningAggregateCheck(input: {
+  readonly attempt: string | null;
   readonly context: CheckTarget;
   readonly existing: { readonly id: number; readonly name: string };
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<boolean> {
   const { existing } = input;
-  await input.octokit.rest.checks.update({
+  await withOneRetry(() => input.octokit.rest.checks.update({
     owner: input.context.owner,
     repo: input.context.repo,
     check_run_id: existing.id,
@@ -1371,8 +1383,9 @@ async function concludeRunningAggregateCheck(input: {
         "",
         input.message,
       ].join("\n").slice(0, 65_535),
+      ...input.attempt === null ? {} : { text: reviewAttemptMarker(input.attempt) },
     },
-  });
+  }));
   return true;
 }
 

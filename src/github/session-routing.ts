@@ -24,6 +24,16 @@ export function startsFreshReviewSession(
 /** Channel-state field naming the review attempt a session runs. */
 export const reviewAttemptStateKey = "slopSheriffReviewAttempt";
 
+/**
+ * The review attempt a dispatch accepts: its GitHub delivery id, which Eve's
+ * `defaultGitHubAuth` records on the session auth. Both the running check's
+ * owner marker and the session's channel state derive from this.
+ */
+export function reviewAttemptFromAuth(auth: SessionAuthContext | null | undefined): string | null {
+  const attempt = auth?.attributes.delivery_id;
+  return typeof attempt === "string" && attempt.length > 0 ? attempt : null;
+}
+
 /** The review attempt recorded in a session's channel state, if any. */
 export function reviewAttemptFromState(state: unknown): string | null {
   if (typeof state !== "object" || state === null) return null;
@@ -52,16 +62,14 @@ export function withAcceptedReviewState<TState>(
   if (typeof state !== "object" || state === null || !("headSha" in state)) {
     return options;
   }
-  const attempt = options.auth?.attributes.delivery_id;
+  const attempt = reviewAttemptFromAuth(options.auth);
   // The channel state type is generic here; only these fields are replaced.
   return {
     ...options,
     state: {
       ...state,
       headSha: head,
-      ...typeof attempt === "string" && attempt.length > 0
-        ? { [reviewAttemptStateKey]: attempt }
-        : {},
+      ...attempt === null ? {} : { [reviewAttemptStateKey]: attempt },
     },
   } as ChannelSendOptions<TState>;
 }

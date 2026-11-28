@@ -1,4 +1,5 @@
 import type { Octokit } from "@octokit/rest";
+import { boundedText } from "./deterministic-presentation";
 import { concludeRunningChecks } from "./publication";
 
 /** The `session.failed` event data Eve passes to a channel. */
@@ -19,35 +20,25 @@ export interface FailedSessionTarget {
   readonly reviewAttempt: string | null;
 }
 
-function displayLimit(value: string, limit = 160): string {
-  const trimmed = value.trim();
-  return trimmed.length <= limit ? trimmed : `${trimmed.slice(0, limit - 1).trimEnd()}…`;
-}
-
-function errorName(details: unknown): string | undefined {
+function detailString(details: unknown, key: "errorId" | "name"): string | undefined {
   if (typeof details !== "object" || details === null) return undefined;
-  const name = (details as { readonly name?: unknown }).name;
-  return typeof name === "string" && name.trim().length > 0 ? name.trim() : undefined;
-}
-
-function errorId(details: unknown): string | undefined {
-  if (typeof details !== "object" || details === null) return undefined;
-  const id = (details as { readonly errorId?: unknown }).errorId;
-  return typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
+  const value = (details as Readonly<Record<string, unknown>>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 /**
  * The reason recorded on the concluded checks and the failure comment. It
  * shows no more of the error than Eve's own failure comment did: the error
- * class, at most 160 characters of its message, and its error id.
+ * class, at most 160 characters of its message, and its error id. Every field
+ * is bounded, so the reason always fits a check summary and a comment.
  */
 export function failedSessionReason(event: FailedSessionEvent): string {
-  const name = errorName(event.details) ?? event.code;
-  const message = displayLimit(event.message);
-  const id = errorId(event.details);
+  const name = boundedText(detailString(event.details, "name") ?? event.code, 64);
+  const message = boundedText(event.message, 160);
+  const id = detailString(event.details, "errorId");
   return [
     `The review session stopped before it could publish a verdict (${name}${message ? `: ${message}` : ""}).`,
-    ...id ? [`Error id: ${id}`] : [],
+    ...id ? [`Error id: ${boundedText(id, 80)}`] : [],
     "",
     "A collaborator with write access can comment `@slop-sheriff full review` to run the review again.",
   ].join("\n");
@@ -56,9 +47,9 @@ export function failedSessionReason(event: FailedSessionEvent): string {
 /**
  * Eve emits `session.failed` without `turn.failed` when a durable step
  * exhausts its retries, so the telemetry hook that concludes checks on
- * `turn.failed` never runs. This channel handler closes the gap: every review
- * check still running on the session's head is concluded with the reason
- * before the failure comment is posted.
+ * `turn.failed` never runs. This channel handler closes the gap: it tries to
+ * conclude every review check the session's attempt still owns on its head,
+ * logs any update GitHub rejects, and then posts the failure comment either way.
  */
 export async function concludeFailedSession(input: {
   readonly event: FailedSessionEvent;
