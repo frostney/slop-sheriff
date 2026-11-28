@@ -243,6 +243,51 @@ function checkSummary(
   ].join("\n");
 }
 
+type ReviewEvent = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+
+const submissionRecheckDelayMs = 250;
+
+/** The review state GitHub shows once each submission event took effect. */
+const submittedReviewState = {
+  APPROVE: "APPROVED",
+  COMMENT: "COMMENTED",
+  REQUEST_CHANGES: "CHANGES_REQUESTED",
+} as const satisfies Record<ReviewEvent, string>;
+
+/**
+ * Whether a review GitHub reported a failure for was submitted anyway, with
+ * the decision that was requested. Any other state, such as a dismissed
+ * review or a comment where blocking mode asked for a decision, is not.
+ */
+async function reviewWasSubmitted(
+  octokit: OctokitClient,
+  context: Pick<TrustedGitHubContext, "owner" | "pullRequest" | "repo">,
+  reviewId: number,
+  event: ReviewEvent,
+): Promise<boolean> {
+  // Read twice, the second time after a short pause: the same API that just
+  // answered with an error may also lag or fail once on the read after it.
+  for (let read = 1; read <= 2; read += 1) {
+    if (read > 1) await new Promise((resolve) => setTimeout(resolve, submissionRecheckDelayMs));
+    try {
+      const review = await octokit.rest.pulls.getReview({
+        owner: context.owner,
+        repo: context.repo,
+        pull_number: context.pullRequest,
+        review_id: reviewId,
+      });
+      if (review.data.state === submittedReviewState[event]) return true;
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "known-good-review.publication.submission_check_failed",
+        read,
+        error: error instanceof Error ? error.name : "unknown",
+      }));
+    }
+  }
+  return false;
+}
+
 type CheckTarget = Pick<TrustedGitHubContext, "headSha" | "owner" | "repo">;
 
 async function latestCheck(
@@ -609,6 +654,11 @@ async function createReviewThreads(
   if (!pullRequestReviewId) {
     throw new Error("GitHub did not return the pending review identity");
   }
+  const requestedEvent: ReviewEvent = config.blocking
+    ? hasBlockingFinding(report)
+      ? "REQUEST_CHANGES"
+      : "APPROVE"
+    : "COMMENT";
   try {
     for (const thread of threads) {
       await octokit.graphql(addReviewThreadMutation, {
@@ -627,11 +677,7 @@ async function createReviewThreads(
         },
       });
     }
-    const event = config.blocking
-      ? hasBlockingFinding(report)
-        ? "REQUEST_CHANGES" as const
-        : "APPROVE" as const
-      : "COMMENT" as const;
+    const event = requestedEvent;
     await octokit.rest.pulls.submitReview({
       owner: context.owner,
       repo: context.repo,
@@ -643,6 +689,17 @@ async function createReviewThreads(
         : { body: checkSummary(report, config).slice(0, 65_535) }),
     });
   } catch (error) {
+    // GitHub can answer a submission with an error after it took effect (an
+    // HTTP 500 on 28 Nov 2026 left a submitted review behind). A review that
+    // is no longer pending was published, so publication carries on.
+    if (await reviewWasSubmitted(octokit, context, created.data.id, requestedEvent)) {
+      console.warn(JSON.stringify({
+        event: "known-good-review.publication.submission_recovered",
+        error: error instanceof Error ? error.name : "unknown",
+        state: submittedReviewState[requestedEvent],
+      }));
+      return;
+    }
     try {
       await octokit.rest.pulls.deletePendingReview({
         owner: context.owner,
