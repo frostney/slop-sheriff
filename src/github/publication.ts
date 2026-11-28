@@ -243,6 +243,25 @@ function checkSummary(
   ].join("\n");
 }
 
+/** Whether a review GitHub reported a failure for was submitted anyway. */
+async function reviewWasSubmitted(
+  octokit: OctokitClient,
+  context: Pick<TrustedGitHubContext, "owner" | "pullRequest" | "repo">,
+  reviewId: number,
+): Promise<boolean> {
+  try {
+    const review = await octokit.rest.pulls.getReview({
+      owner: context.owner,
+      repo: context.repo,
+      pull_number: context.pullRequest,
+      review_id: reviewId,
+    });
+    return review.data.state !== "PENDING";
+  } catch {
+    return false;
+  }
+}
+
 async function latestCheck(
   octokit: OctokitClient,
   context: Omit<TrustedGitHubContext, "patchFingerprint">,
@@ -624,6 +643,10 @@ async function createReviewThreads(
         : { body: checkSummary(report, config).slice(0, 65_535) }),
     });
   } catch (error) {
+    // GitHub can answer a submission with an error after it took effect (an
+    // HTTP 500 on 28 Nov 2026 left a submitted review behind). A review that
+    // is no longer pending was published, so publication carries on.
+    if (await reviewWasSubmitted(octokit, context, created.data.id)) return;
     try {
       await octokit.rest.pulls.deletePendingReview({
         owner: context.owner,

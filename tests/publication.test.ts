@@ -121,9 +121,10 @@ interface CapturedRequest {
   readonly path: string;
 }
 
-function json(value: unknown): Response {
+function json(value: unknown, status = 200): Response {
   return Response.json(value, {
     headers: { "content-type": "application/json" },
+    status,
   });
 }
 
@@ -1023,6 +1024,88 @@ describe("GitHub publication lifecycle", () => {
       body: expect.stringContaining("moved to a new inline location"),
     });
   });
+
+  test.each(["COMMENTED", "PENDING"] as const)(
+    "a review submission GitHub rejects is published only if GitHub shows it %s",
+    async (stateAfterError) => {
+      // Recorded on 28 Nov 2026: GitHub answered the submission with HTTP 500
+      // after it took effect, and the pending-review cleanup then failed.
+      const requests: CapturedRequest[] = [];
+      const octokit = new Octokit({
+        auth: "test-token",
+        request: {
+          fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+            const url = new URL(String(resource));
+            const method = init?.method ?? "GET";
+            const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+            requests.push({ body, headers: new Headers(init?.headers), method, path: url.pathname });
+            if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+              return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+            }
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
+              return json([{
+                filename: "src/review.ts",
+                status: "modified",
+                sha: "blob",
+                patch: "@@ -10,3 +10,3 @@\n context\n-old\n+new\n context",
+              }]);
+            }
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) return json([]);
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) return json([]);
+            if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews")) {
+              return json({ id: 101, node_id: "PRR_101" });
+            }
+            if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews/101/events")) {
+              return json({ message: "Server Error" }, 500);
+            }
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+              return json({ id: 101, state: stateAfterError });
+            }
+            if (method === "DELETE" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+              return stateAfterError === "PENDING"
+                ? json({ id: 101, state: "PENDING" })
+                : json({ message: "Can not delete a non-pending pull request review" }, 422);
+            }
+            if (method === "POST" && url.pathname === "/graphql") {
+              const operation = graphqlOperation(body);
+              if (operation.includes("KnownGoodReviewAddReviewThread")) {
+                return json({ data: { addPullRequestReviewThread: { thread: { id: "PRRT_202" } } } });
+              }
+              throw new Error(`Unexpected GraphQL operation: ${operation}`);
+            }
+            if (method === "GET" && url.pathname.endsWith("/check-runs")) {
+              return json({ check_runs: [], total_count: 0 });
+            }
+            if (method === "POST" && url.pathname.endsWith("/check-runs")) {
+              return json({ id: 300, name: "slop-sheriff", html_url: "https://github.com/acme/widget/runs/300" });
+            }
+            if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) return json([]);
+            if (method === "POST" && url.pathname.endsWith("/issues/7/comments")) {
+              return json({ id: 401, body });
+            }
+            throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+          },
+        },
+      });
+
+      const published = publishReview({ context: context(), octokit, report: report() });
+      const deleted = () => requests.some((request) =>
+        request.method === "DELETE" && request.path.endsWith("/pulls/7/reviews/101"));
+      const stateWritten = () => requests.some((request) =>
+        request.method === "POST" &&
+        request.path.endsWith("/issues/7/comments") &&
+        JSON.stringify(request.body).includes("known-good-review:state"));
+      if (stateAfterError === "COMMENTED") {
+        await published;
+        expect(deleted()).toBeFalse();
+        expect(stateWritten()).toBeTrue();
+      } else {
+        await expect(published).rejects.toThrow();
+        expect(deleted()).toBeTrue();
+        expect(stateWritten()).toBeFalse();
+      }
+    },
+  );
 
   test("replies to and resolves a fixed finding without reposting it", async () => {
     const requests: CapturedRequest[] = [];
