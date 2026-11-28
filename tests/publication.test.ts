@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import { z } from "zod";
 import {
@@ -121,9 +121,10 @@ interface CapturedRequest {
   readonly path: string;
 }
 
-function json(value: unknown): Response {
+function json(value: unknown, status = 200): Response {
   return Response.json(value, {
     headers: { "content-type": "application/json" },
+    status,
   });
 }
 
@@ -860,6 +861,9 @@ describe("GitHub publication lifecycle", () => {
             }
             throw new Error(`Unexpected GraphQL operation: ${operation}`);
           }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+            return json({ id: 101, state: "PENDING" });
+          }
           if (
             method === "DELETE" &&
             url.pathname.endsWith("/pulls/7/reviews/101")
@@ -871,16 +875,15 @@ describe("GitHub publication lifecycle", () => {
       },
     });
 
-    expect(
+    await expect(
       publishReview({ context: context(), octokit, report: report() }),
     ).rejects.toThrow("native thread creation failed");
-    expect(
-      requests.some(
-        (request) =>
-          request.method === "DELETE" &&
-          request.path.endsWith("/pulls/7/reviews/101"),
-      ),
-    ).toBeTrue();
+    const read = requests.findIndex((request) =>
+      request.method === "GET" && request.path.endsWith("/pulls/7/reviews/101"));
+    const deletion = requests.findIndex((request) =>
+      request.method === "DELETE" && request.path.endsWith("/pulls/7/reviews/101"));
+    expect(read).toBeGreaterThan(-1);
+    expect(deletion).toBeGreaterThan(read);
     expect(
       requests.some(
         (request) =>
@@ -1022,6 +1025,189 @@ describe("GitHub publication lifecycle", () => {
     expect(requests[retirementReply]?.body).not.toMatchObject({
       body: expect.stringContaining("moved to a new inline location"),
     });
+  });
+
+  test.each([
+    { blocking: false, important: true, state: "COMMENTED", published: true },
+    { blocking: true, important: true, state: "CHANGES_REQUESTED", published: true },
+    { blocking: true, important: false, state: "APPROVED", published: true },
+    { blocking: true, important: true, state: "COMMENTED", published: false },
+    { blocking: true, important: false, state: "DISMISSED", published: false },
+    { blocking: true, important: true, state: "APPROVED", published: false },
+    { blocking: true, important: false, state: "CHANGES_REQUESTED", published: false },
+    { blocking: false, important: true, state: "PENDING", published: false },
+  ] as const)(
+    "a rejected submission (blocking: $blocking) GitHub shows as $state counts as published: $published",
+    async ({ blocking, important, state: stateAfterError, published: expectPublished }) => {
+      // Recorded on 28 Nov 2026: GitHub answered the submission with HTTP 500
+      // after it took effect, and the pending-review cleanup then failed.
+      const requests: CapturedRequest[] = [];
+      const octokit = new Octokit({
+        auth: "test-token",
+        request: {
+          fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+            const url = new URL(String(resource));
+            const method = init?.method ?? "GET";
+            const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+            requests.push({ body, headers: new Headers(init?.headers), method, path: url.pathname });
+            if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+              return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+            }
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
+              return json([{
+                filename: "src/review.ts",
+                status: "modified",
+                sha: "blob",
+                patch: "@@ -10,3 +10,3 @@\n context\n-old\n+new\n context",
+              }]);
+            }
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) return json([]);
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) return json([]);
+            if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews")) {
+              return json({ id: 101, node_id: "PRR_101" });
+            }
+            if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews/101/events")) {
+              return json({ message: "Server Error" }, 500);
+            }
+            if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+              return json({ id: 101, state: stateAfterError });
+            }
+            if (method === "DELETE" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+              return stateAfterError === "PENDING"
+                ? json({ id: 101, state: "PENDING" })
+                : json({ message: "Can not delete a non-pending pull request review" }, 422);
+            }
+            if (method === "PATCH" && url.pathname.includes("/check-runs/")) {
+              return json({ id: 300, name: "slop-sheriff", html_url: "https://github.com/acme/widget/runs/300" });
+            }
+            if (method === "POST" && url.pathname === "/graphql") {
+              const operation = graphqlOperation(body);
+              if (operation.includes("KnownGoodReviewAddReviewThread")) {
+                return json({ data: { addPullRequestReviewThread: { thread: { id: "PRRT_202" } } } });
+              }
+              throw new Error(`Unexpected GraphQL operation: ${operation}`);
+            }
+            if (method === "GET" && url.pathname.endsWith("/check-runs")) {
+              return json({ check_runs: [], total_count: 0 });
+            }
+            if (method === "POST" && url.pathname.endsWith("/check-runs")) {
+              return json({ id: 300, name: "slop-sheriff", html_url: "https://github.com/acme/widget/runs/300" });
+            }
+            if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) return json([]);
+            if (method === "POST" && url.pathname.endsWith("/issues/7/comments")) {
+              return json({ id: 401, body });
+            }
+            throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+          },
+        },
+      });
+
+      const reviewed = report();
+      if (!important) reviewed.findings[0]!.severity = "IMPROVEMENT";
+      const published = publishReview({
+        config: { blocking, profile: "thorough" },
+        context: context(),
+        octokit,
+        report: reviewed,
+      });
+      const deleted = () => requests.some((request) =>
+        request.method === "DELETE" && request.path.endsWith("/pulls/7/reviews/101"));
+      const stateWritten = () => requests.some((request) =>
+        request.method === "POST" &&
+        request.path.endsWith("/issues/7/comments") &&
+        JSON.stringify(request.body).includes("known-good-review:state"));
+      if (expectPublished) {
+        await published;
+        expect(deleted()).toBeFalse();
+        expect(stateWritten()).toBeTrue();
+      } else {
+        await expect(published).rejects.toThrow();
+        expect(deleted()).toBeTrue();
+        expect(stateWritten()).toBeFalse();
+      }
+      const submitted = requests.find((request) =>
+        request.method === "POST" && request.path.endsWith("/pulls/7/reviews/101/events"));
+      expect(submitted?.body).toMatchObject({
+        event: blocking ? (important ? "REQUEST_CHANGES" : "APPROVE") : "COMMENT",
+      });
+    },
+  );
+
+  test.each([
+    { failedReads: 1, published: true },
+    { failedReads: 2, published: false },
+  ])("a submission check with $failedReads failed read(s) counts as published: $published", async ({ failedReads, published }) => {
+    let reads = 0;
+    const warnings: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    const requests: string[] = [];
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const url = new URL(String(resource));
+          const method = init?.method ?? "GET";
+          requests.push(`${method} ${url.pathname}`);
+          if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+            return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
+            return json([{
+              filename: "src/review.ts",
+              status: "modified",
+              sha: "blob",
+              patch: "@@ -10,3 +10,3 @@\n context\n-old\n+new\n context",
+            }]);
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) return json([]);
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) return json([]);
+          if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json({ id: 101, node_id: "PRR_101" });
+          }
+          if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews/101/events")) {
+            return json({ message: "Server Error" }, 500);
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+            reads += 1;
+            return reads <= failedReads
+              ? json({ message: "Server Error" }, 502)
+              : json({ id: 101, state: "COMMENTED" });
+          }
+          if (method === "DELETE" && url.pathname.endsWith("/pulls/7/reviews/101")) {
+            return json({ id: 101, state: "PENDING" });
+          }
+          if (method === "POST" && url.pathname === "/graphql") {
+            return json({ data: { addPullRequestReviewThread: { thread: { id: "PRRT_202" } } } });
+          }
+          if (method === "GET" && url.pathname.endsWith("/check-runs")) {
+            return json({ check_runs: [], total_count: 0 });
+          }
+          if (method === "POST" && url.pathname.endsWith("/check-runs")) {
+            return json({ id: 300, name: "slop-sheriff", html_url: "https://github.com/acme/widget/runs/300" });
+          }
+          if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) return json([]);
+          if (method === "POST" && url.pathname.endsWith("/issues/7/comments")) return json({ id: 401 });
+          throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+        },
+      },
+    });
+
+    try {
+      const publication = publishReview({ context: context(), octokit, report: report() });
+      if (published) await publication;
+      else await expect(publication).rejects.toThrow();
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(reads).toBe(2);
+    expect(requests.includes("DELETE /repos/acme/widget/pulls/7/reviews/101")).toBe(!published);
+    const events = warnings.map((warning) => (JSON.parse(warning) as { event: string }).event);
+    expect(events.filter((event) => event === "known-good-review.publication.submission_check_failed"))
+      .toHaveLength(failedReads);
+    expect(events.includes("known-good-review.publication.submission_recovered")).toBe(published);
   });
 
   test("replies to and resolves a fixed finding without reposting it", async () => {
